@@ -2,11 +2,13 @@
 """Generate Wonderdraft symbol variants.
 
     .venv/bin/python generate.py                       # everything, 12 of each
-    .venv/bin/python generate.py -t cottage,cave -n 30 --seed 7
+    .venv/bin/python generate.py -t cottage,cave -n 30 --seed 7   # types or category words
+    .venv/bin/python generate.py -t land                         # every Land - * category
     .venv/bin/python generate.py --style line           # transparent line art (no white fill)
 
 Symbols go to out/<pack>/sprites/symbols/<Category>/ (line style: out/<pack>Line/...),
-contact sheets to preview/. Copy the pack folder into Wonderdraft's assets folder.
+contact sheets to preview/<Group>/<Category>_<style>.png. Copy the pack folder into
+Wonderdraft's assets folder.
 """
 import argparse
 import math
@@ -70,22 +72,60 @@ def render(kind, seed, style="filled", res=2, ink=(30, 30, 30), wash=(150, 98, 6
     return cv.to_image(ink=ink, filled=(style == "filled"), wash=wash, seed=seed)
 
 
-def contact_sheet(images, cols=6, cell=200, bg=(150, 178, 150)):
+def contact_sheet(images, cols=6, cell=200, bg=(150, 178, 150), labels=None):
     rows = math.ceil(len(images) / cols)
-    sheet = Image.new("RGBA", (cols * cell, rows * cell), (*bg, 255))
+    sheet = Image.new("RGBA", (cols * cell, max(1, rows) * cell), (*bg, 255))
     d = ImageDraw.Draw(sheet)
     for i, img in enumerate(images):
+        if img is None:
+            continue
         im = img.copy()
         im.thumbnail((cell - 16, cell - 22))
         x, y = (i % cols) * cell, (i // cols) * cell
         sheet.alpha_composite(im, (x + (cell - im.width) // 2, y + 4 + (cell - 22 - im.height) // 2))
-        d.text((x + 6, y + cell - 16), f"#{i:03d}", fill=(40, 60, 40, 255))
+        d.text((x + 6, y + cell - 16), labels[i] if labels else f"#{i:03d}", fill=(40, 60, 40, 255))
     return sheet
+
+
+PARCHMENT = (226, 220, 190)
+GRASS = (150, 178, 150)
+
+
+def select(tokens):
+    """Exact type names, or case-insensitive pieces of a category name (e.g. 'land', 'cave')."""
+    out = []
+    for tok in tokens:
+        if tok in TYPES:
+            hits = [tok]
+        else:
+            hits = [k for k, v in TYPES.items() if tok.lower() in v[0].lower() or tok.lower() in k]
+        if not hits:
+            raise SystemExit(f"unknown type or category: {tok!r}")
+        out += [h for h in hits if h not in out]
+    return out
+
+
+def category_sheet(cat, per_kind, cols=6):
+    """One sheet per category; several piece types get one labelled row each."""
+    kinds = list(per_kind)
+    if len(kinds) == 1:
+        imgs = per_kind[kinds[0]]
+        labels = [f"#{i:03d}" for i in range(len(imgs))]
+    else:
+        imgs, labels = [], []
+        for k in kinds:
+            row = per_kind[k][:cols]
+            short = k.split("_", 1)[1] if "_" in k else k
+            imgs += row + [None] * (cols - len(row))
+            labels += [f"{short} #{i:03d}" for i in range(len(row))] + [""] * (cols - len(row))
+    bg = PARCHMENT if cat.startswith("Land") else GRASS
+    return contact_sheet(imgs, cols=cols, bg=bg, labels=labels)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("-t", "--types", default=",".join(TYPES), help="comma list: " + ",".join(TYPES))
+    ap.add_argument("-t", "--types", default=",".join(TYPES),
+                    help="comma list of type names or category words, e.g. 'cottage,land,cave'")
     ap.add_argument("-n", "--count", type=int, default=12)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--style", choices=["filled", "line"], default="filled",
@@ -100,9 +140,10 @@ def main():
 
     ink = tuple(int(args.ink[i:i + 2], 16) for i in (0, 2, 4))
     wash = None if args.wash == "none" else tuple(int(args.wash[i:i + 2], 16) for i in (0, 2, 4))
-    for kind in [t.strip() for t in args.types.split(",") if t.strip()]:
+    pack = args.pack + ("" if args.style == "filled" else "Line")
+    by_cat = {}
+    for kind in select([t.strip() for t in args.types.split(",") if t.strip()]):
         cat = TYPES[kind][0]
-        pack = args.pack + ("" if args.style == "filled" else "Line")
         folder = Path(args.out) / pack / "sprites" / "symbols" / cat
         folder.mkdir(parents=True, exist_ok=True)
         imgs = []
@@ -110,9 +151,13 @@ def main():
             img = render(kind, args.seed * 100003 + i, args.style, args.res, ink, wash)
             img.save(folder / f"{kind}_{args.seed}_{i:03d}.png")
             imgs.append(img)
-        Path(args.preview).mkdir(exist_ok=True)
-        contact_sheet(imgs).save(Path(args.preview) / f"{kind}_{args.style}.png")
-        print(f"{kind:8s} -> {folder}  ({len(imgs)} symbols)")
+        by_cat.setdefault(cat, {})[kind] = imgs
+        print(f"{kind:14s} -> {folder}  ({len(imgs)} symbols)")
+    for cat, per_kind in by_cat.items():
+        group, name = cat.split(" - ", 1)
+        d = Path(args.preview) / group
+        d.mkdir(parents=True, exist_ok=True)
+        category_sheet(cat, per_kind).save(d / f"{name.replace(' ', '_')}_{args.style}.png")
 
 
 if __name__ == "__main__":

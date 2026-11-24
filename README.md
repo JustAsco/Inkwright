@@ -39,10 +39,13 @@ Then copy the pack folder from `out/` (for example `out/RuinsAndLairs/`) into Wo
 | `-t`, `--types` | all | Comma list of type names (`cottage,round_spire`) or category words (`land`, `cave`, `divine`) |
 | `-n`, `--count` | 12 | Variants per type |
 | `--seed` | 1 | Change it for a fresh batch. The same seed always redraws the same symbols |
-| `--style` | `filled` | `filled`: ink with white paper inside shapes. `line`: ink only, so the map colour shows through |
+| `--style` | `filled` | `filled`: ink with white paper inside shapes, so symbols hide roads and each other. `line`: ink only, transparent inside |
 | `--res` | 3 | Output pixels per drawing unit (higher = bigger, crisper PNGs) |
 | `--ink` | `1e1e1e` | Ink colour (hex) |
 | `--wash` | `96623e` | Colour of the cliff/canyon shading (hex), or `none` for ink only |
+| `--draw-mode` | `sample_color` | Wonderdraft `draw_mode` written to `.wonderdraft_symbols`: `sample_color` tints the white fill to the land colour underneath, `normal` draws as-is |
+| `--paper` | `ffffff` | Fill colour inside shapes (filled style) |
+| `--refresh-meta` | | Only rewrite `.wonderdraft_symbols` for the PNGs already in `out/` |
 | `--pack` | `RuinsAndLairs` | Pack folder name (the line style gets a `Line` suffix) |
 
 File names include the type, seed and index (`cottage_1_007.png`), so you can always regenerate a
@@ -51,9 +54,32 @@ symbol you like.
 ## Output and previews
 
 ```
-out/RuinsAndLairs/sprites/symbols/<Category>/<type>_<seed>_<n>.png
+out/RuinsAndLairs/sprites/symbols/<Group>/<type>_<seed>_<n>.png     Settlements, Ruins, Lairs, Divine, Land
+out/RuinsAndLairs/sprites/symbols/<Group>/.wonderdraft_symbols
 preview/<Group>/<Category>_<style>.png      contact sheet per category
 ```
+
+All categories of a group share one folder, so Wonderdraft shows one palette per group. The
+file names start with their type (`hill_cave_…`, `burrow_…`). Each group folder gets a
+`.wonderdraft_symbols` metadata file with an entry per image:
+
+- **Pivot** (`offset_x`, `offset_y`): near the bottom of the drawing, at the front ground point,
+  like Wonderdraft's own sprites. Wonderdraft draws the symbol with the lower pivot in front, so
+  these layer correctly against each other and against the default sprites. Cliff and canyon
+  pieces pivot on their centre.
+- **Radius**: estimated from the drawn width. It's smaller for cliff and canyon pieces so they can
+  overlap.
+- **draw_mode**: from `--draw-mode`, `sample_color` by default.
+
+To get symbols that look like Wonderdraft's own line-art sprites, use the **filled** style with
+`sample_color`. The white fill takes the map colour underneath, so a house turns green on grass,
+yet it is still opaque: it hides the road behind it, and houses overlap each other cleanly. The
+**line** style is transparent inside, so anything behind it always shows through. `custom_colors`
+colourises through the image's RGB channels, so it doesn't suit plain black ink.
+
+Re-running a type into the same folder updates its entries and keeps the others.
+`generate.py --refresh-meta` rewrites the metadata for every PNG already in `out/` without
+re-rendering. Add `--draw-mode` to change the draw mode at the same time.
 
 Every run writes a contact sheet for each category it generated, so previewing a category is just
 generating it, e.g. `generate.py -t robed_statue -n 18`. The `#003` labels match the file names.

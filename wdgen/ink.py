@@ -144,9 +144,12 @@ class Canvas:
         arr = np.dstack([rgb, a * 255]).round().clip(0, 255).astype(np.uint8)
         img = Image.fromarray(arr, "RGBA")
         bbox = Image.fromarray((a > 0.04).astype(np.uint8) * 255).getbbox()
+        self.crop_origin = (0, 0)  # top-left of the returned image in full-canvas output pixels
         if bbox:
             l, t, r, b = bbox
-            img = img.crop((max(0, l - pad), max(0, t - pad), min(img.width, r + pad), min(img.height, b + pad)))
+            box = (max(0, l - pad), max(0, t - pad), min(img.width, r + pad), min(img.height, b + pad))
+            img = img.crop(box)
+            self.crop_origin = box[:2]
         return img
 
 

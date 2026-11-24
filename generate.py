@@ -6,11 +6,12 @@
     .venv/bin/python generate.py -t land                         # every Land - * category
     .venv/bin/python generate.py --style line           # transparent line art (no white fill)
 
-Symbols go to out/<pack>/sprites/symbols/<Category>/ (line style: out/<pack>Line/...),
+Symbols go to out/<pack>/sprites/symbols/<Group>/ (line style: out/<pack>Line/...),
 contact sheets to preview/<Group>/<Category>_<style>.png. Copy the pack folder into
 Wonderdraft's assets folder.
 """
 import argparse
+import json
 import math
 import zlib
 from functools import partial
@@ -62,18 +63,72 @@ TYPES = {
     "mesa": ("Land - Mesas", terrain.mesa, 260, 200, 0.5),
     "terraced_hill": ("Land - Terraced Hills", terrain.terraced_hill, 280, 260, 0.55),
 }
+LINE_PIECES = {"cliff", "steep_cliff", "canyon", "canyon_bend", "mesa", "terraced_hill"}
 for _role in terrain.ARC_ROLES:
     TYPES[f"curve_{_role}"] = ("Land - Cliff Curves", partial(terrain.cliff_curve, role=_role), 260, 220, 0.5)
     TYPES[f"bay_{_role}"] = ("Land - Cliff Bays", partial(terrain.cliff_curve, role=_role, inner=True), 260, 220, 0.5)
+    LINE_PIECES |= {f"curve_{_role}", f"bay_{_role}"}
 
 
-def render(kind, seed, style="filled", res=2, ink=(30, 30, 30), wash=(150, 98, 62)):
+def render(kind, seed, style="filled", res=2, ink=(30, 30, 30), wash=(150, 98, 62), meta=False,
+           paper=(255, 255, 255)):
+    """Draw one symbol. With meta=True also return its ground pivot in image pixels (x right, y down)."""
     _, fn, w, h, *oy = TYPES[kind]
     rng = np.random.default_rng([seed, zlib.crc32(kind.encode())])
     cv = Canvas(w, h, res=res)
     pen = Pen(cv, rng, width=1.6)
-    fn(pen, Proj(w / 2, h * (oy[0] if oy else 0.68)), rng)
-    return cv.to_image(ink=ink, filled=(style == "filled"), wash=wash, seed=seed)
+    P = Proj(w / 2, h * (oy[0] if oy else 0.68))
+    fn(pen, P, rng)
+    img = cv.to_image(ink=ink, paper=paper, filled=(style == "filled"), wash=wash, seed=seed)
+    if not meta:
+        return img
+    cx, cy = cv.crop_origin
+    return img, (P.ox * res - cx, P.oy * res - cy)
+
+
+def symbol_meta(stem, kind, i, img, pivot_x, draw_mode):
+    """One .wonderdraft_symbols entry. Offsets are from the image centre, +x right, +y up (pixels).
+
+    Like Wonderdraft's own sprites, the pivot sits near the bottom of the drawing (the front ground
+    point): Wonderdraft draws whichever symbol has the lower pivot in front. Open cliff/canyon
+    pieces pivot on their centre instead so they chain naturally.
+    """
+    w, h = img.size
+    bbox = img.getchannel("A").point(lambda v: 255 if v > 10 else 0).getbbox() or (0, 0, w, h)
+    if kind in LINE_PIECES:
+        px, py = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
+    else:
+        px = (bbox[0] + bbox[2]) / 2 if pivot_x is None else pivot_x
+        py = bbox[3] - max(3, 0.03 * (bbox[3] - bbox[1]))
+    px, py = min(max(px, 0), w), min(max(py, 0), h)
+    return {
+        "name": f"{kind.replace('_', ' ').title()} {i + 1}",
+        "radius": max(8, round((0.12 if kind in LINE_PIECES else 0.35) * (bbox[2] - bbox[0]))),
+        "offset_x": round(px - w / 2),
+        "offset_y": round(h / 2 - py),
+        "draw_mode": draw_mode,
+    }
+
+
+def refresh_meta(out_dir, draw_mode):
+    """Rewrite every .wonderdraft_symbols under out_dir from the PNGs already there (no re-render)."""
+    n = 0
+    for folder in sorted(Path(out_dir).glob("*/sprites/symbols/*")):
+        meta_path = folder / ".wonderdraft_symbols"
+        try:
+            old = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        except json.JSONDecodeError:
+            old = {}
+        meta = {}
+        for png in sorted(folder.glob("*.png")):
+            stem = png.stem
+            kind, _, idx = stem.rsplit("_", 2)
+            img = Image.open(png)
+            px = img.width / 2 + old[stem]["offset_x"] if stem in old else None
+            meta[stem] = symbol_meta(stem, kind, int(idx) if idx.isdigit() else 0, img, px, draw_mode)
+            n += 1
+        meta_path.write_text(json.dumps(meta, indent=2) + "\n")
+    return n
 
 
 def contact_sheet(images, cols=6, cell=200, bg=(150, 178, 150), labels=None):
@@ -136,25 +191,48 @@ def main():
                     help="filled = white paper inside shapes; line = ink only, transparent inside")
     ap.add_argument("--res", type=int, default=3, help="output pixels per drawing unit")
     ap.add_argument("--ink", default="1e1e1e", help="hex ink colour")
+    ap.add_argument("--paper", default="ffffff",
+                    help="hex colour of the fill inside shapes (filled style); with sample_color a mid grey "
+                         "may match the ground better than white")
     ap.add_argument("--wash", default="96623e", help="hex colour of the cliff/canyon shading, or 'none'")
+    ap.add_argument("--draw-mode", default="sample_color",
+                    choices=["normal", "sample_color", "custom_colors", "custom_colors_2"],
+                    help="Wonderdraft draw_mode for .wonderdraft_symbols: sample_color tints the white fill to the land "
+                         "colour (like Wonderdraft's own line-art sprites); normal draws as-is")
+    ap.add_argument("--refresh-meta", action="store_true",
+                    help="only rewrite the .wonderdraft_symbols files for the PNGs already in --out, then exit")
     ap.add_argument("--pack", default="RuinsAndLairs")
     ap.add_argument("--out", default="out")
     ap.add_argument("--preview", default="preview")
     args = ap.parse_args()
 
+    if args.refresh_meta:
+        print(f"rewrote metadata for {refresh_meta(args.out, args.draw_mode)} symbols")
+        return
     ink = tuple(int(args.ink[i:i + 2], 16) for i in (0, 2, 4))
     wash = None if args.wash == "none" else tuple(int(args.wash[i:i + 2], 16) for i in (0, 2, 4))
+    paper = tuple(int(args.paper[i:i + 2], 16) for i in (0, 2, 4))
     pack = args.pack + ("" if args.style == "filled" else "Line")
     by_cat = {}
     for kind in select([t.strip() for t in args.types.split(",") if t.strip()]):
         cat = TYPES[kind][0]
-        folder = Path(args.out) / pack / "sprites" / "symbols" / cat
+        folder = Path(args.out) / pack / "sprites" / "symbols" / cat.split(" - ", 1)[0]  # one folder per group
         folder.mkdir(parents=True, exist_ok=True)
         imgs = []
+        meta_path = folder / ".wonderdraft_symbols"
+        try:
+            meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        except json.JSONDecodeError:
+            meta = {}
         for i in range(args.count):
-            img = render(kind, args.seed * 100003 + i, args.style, args.res, ink, wash)
-            img.save(folder / f"{kind}_{args.seed}_{i:03d}.png")
+            img, pivot = render(kind, args.seed * 100003 + i, args.style, args.res, ink, wash, meta=True, paper=paper)
+            stem = f"{kind}_{args.seed}_{i:03d}"
+            img.save(folder / f"{stem}.png")
+            meta[stem] = symbol_meta(stem, kind, i, img, pivot[0], args.draw_mode)
             imgs.append(img)
+        # keep entries only for images that exist (other kinds share some folders)
+        meta = {k: v for k, v in sorted(meta.items()) if (folder / f"{k}.png").exists()}
+        meta_path.write_text(json.dumps(meta, indent=2) + "\n")
         by_cat.setdefault(cat, {})[kind] = imgs
         print(f"{kind:14s} -> {folder}  ({len(imgs)} symbols)")
     for cat, per_kind in by_cat.items():

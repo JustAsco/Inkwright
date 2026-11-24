@@ -19,12 +19,16 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-from wdgen import castles, divine, lairs, ruins, terrain
+from wdgen import castles, divine, houses, lairs, ruins, terrain
 from wdgen.ink import Canvas, Pen
 from wdgen.proj import Proj
 
 # name -> (category folder, draw fn, canvas w, canvas h[, ground line as fraction of h])
 TYPES = {
+    # settlements
+    "house": ("Settlements - Houses", houses.single_house, 200, 200, 0.62),
+    "hamlet": ("Settlements - Hamlets", houses.hamlet, 260, 240, 0.6),
+    "town_village": ("Settlements - Villages", houses.village, 420, 340, 0.58),
     # ruins
     "cottage": ("Ruins - Cottages", ruins.ruined_cottage, 260, 220),
     "village": ("Ruins - Villages", ruins.ruined_village, 420, 320),
@@ -43,7 +47,7 @@ TYPES = {
     "crag_nest": ("Lairs - Crag Nests", partial(lairs.nest_lair, crag=True), 240, 240),
     "ground_nest": ("Lairs - Ground Nests", partial(lairs.nest_lair, crag=False), 240, 200),
     # divine
-    "temple": ("Divine - Temples", divine.temple, 320, 260, 0.62),
+    "temple": ("Divine - Temples", divine.temple, 420, 340, 0.64),
     "stone_circle": ("Divine - Stone Circles", divine.stone_circle, 300, 260, 0.62),
     "colossus": ("Divine - Colossi", divine.statue_legs, 260, 300, 0.75),
     "robed_statue": ("Divine - Robed Statues", divine.statue_robed, 220, 300, 0.8),

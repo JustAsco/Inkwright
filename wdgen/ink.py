@@ -108,11 +108,13 @@ class Canvas:
         self.washm = ImageChops.lighter(self.washm, tmp)
 
     def clear(self, pts):
-        """Remove ink and paper (true transparency), e.g. ground hiding a canyon floor."""
+        """Remove ink, paper and wash (true transparency), e.g. ground hiding a canyon floor."""
         if len(pts) >= 3:
             sp = self._scale(pts)
             self._d.polygon(sp, fill=0)
             self._p.polygon(sp, fill=0)
+            if self.washm is not None:
+                ImageDraw.Draw(self.washm).polygon(sp, fill=0)
 
     def disc(self, x, y, r, value=255):
         k = self.k
@@ -275,23 +277,57 @@ class Pen:
             pts = [(x + dx * 0.3, y), (x + dx * 0.6 + lean * 0.3, y - h * 0.55), (x + dx + lean, y - h)]
             self.stroke(pts, self.width * 0.7, taper=(0.05, 0.75), smooth=2, wobble=0.1)
 
-    def bush(self, x, y, rx, ry=None):
-        """Foliage clump drawn with dabs, base at (x, y)."""
-        rng = self.rng
-        ry = ry or rx * 0.75
-        cy = y - ry
-        self.cv.erase(blob_pts(rng, x, cy, rx, n=11, irregular=0.12, squash=ry / rx))
-        rows = max(2, int(ry * 2 / 3.0))
+    def bush(self, x, y, rx, ry=None, outline=True):
+        """Hand-inked leafy foliage clump with scalloped lobes and right-side shadow, base at (x, y)."""
+        rng, W0 = self.rng, self.width
+        ry = ry or rx * 0.72
+        cy = y - ry * 0.85
+        # Scalloped multi-lobe silhouette (flat-grounded at bottom, billowy lobes on top)
+        n_lobes = max(5, int(rx / 1.8) + 2)
+        ts = np.linspace(0, TAU, n_lobes * 6, endpoint=False)
+        ph = rng.uniform(0, TAU)
+        scallop = 1.0 + 0.13 * np.abs(np.sin(0.5 * n_lobes * ts + ph)) + 0.05 * np.sin(3 * ts + ph)
+        xs = x + rx * scallop * np.cos(ts)
+        ys = cy + ry * scallop * np.sin(ts)
+        ys = np.minimum(ys, y + ry * 0.12)
+        blob = np.stack([xs, ys], 1)
+        self.cv.erase(blob)
+
+        # Leafy dabs: dense & darker along bottom/east shadow, airy on lit upper-left
+        rows = max(2, int(ry * 2.1 / 2.6))
         for i in range(rows):
             v = (i + 0.5) / rows  # 0 top .. 1 bottom
-            yy = cy - ry + v * 2 * ry
-            half = rx * math.sqrt(max(0.0, 1 - (2 * v - 1) ** 2)) * 0.95
-            n = max(1, int(half * 2 / 4.2) + (1 if v > 0.6 else 0))
+            yy = cy - ry * 0.92 + v * ry * 1.85
+            half = rx * math.sqrt(max(0.0, 1 - (2 * v - 1) ** 2)) * 0.92
+            n = max(1, int(half * 2 / 3.4) + (1 if v > 0.55 else 0))
             for j in range(n):
-                xx = x - half + (j + rng.uniform(0.2, 0.8)) * (2 * half / n)
-                size = rng.uniform(1.6, 2.6) * (1.1 if v > 0.65 else 0.9)
-                self.dab(xx, yy + rng.normal(0, 0.6), size, angle=rng.normal(0, 0.25),
-                         w=self.width * (1.0 if v > 0.65 else 0.75))
+                u = (j + rng.uniform(0.2, 0.8)) / n  # 0 left .. 1 right
+                xx = x - half + u * 2 * half
+                shadow = (u > 0.48) or (v > 0.62)
+                if not shadow and rng.random() < 0.48:
+                    continue  # leave sunlit breathing space on upper-left
+                size = rng.uniform(1.3, 2.2) * (1.1 if shadow else 0.85)
+                self.dab(xx, yy + rng.normal(0, 0.45), size, angle=rng.normal(0.15 if u > 0.5 else -0.1, 0.25),
+                         w=W0 * (0.95 if (u > 0.55 and v > 0.45) else 0.72 if shadow else 0.55))
+
+        if outline:
+            # Crisp scalloped leafy rim (broken slightly on sunlit upper-left for hand-inked charm)
+            ring = np.vstack([blob, blob[:1]])
+            k = len(blob)
+            i = 0
+            while i < k:
+                # bottom & east rim stay mostly continuous; upper-left can breathe gently
+                t_mid = ts[i % k]
+                is_lit = math.sin(t_mid) < -0.25 and math.cos(t_mid) < -0.1
+                span = int(rng.integers(k // 5, k // 2))
+                j = min(k, i + span)
+                if not (is_lit and rng.random() < 0.28):
+                    self.stroke(ring[i:j + 1], W0 * (0.88 if not is_lit else 0.72),
+                                taper=(0.2, 0.2), wobble=0.25)
+                i = j + (int(rng.integers(1, 3)) if is_lit else 0)
+        # Subtle grounded base shadow stroke
+        self.stroke([(x - rx * 0.72, y + 0.3), (x + rx * 0.82, y + 0.3)], W0 * 0.85,
+                    taper=(0.25, 0.2), wobble=0.2)
 
     def stone(self, x, y, r, w=None):
         rng = self.rng

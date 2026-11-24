@@ -1,7 +1,7 @@
 # Wonderdraft Assets
 
-A procedural generator for hand-inked fantasy map symbols: ruins, beast lairs, divine sites and
-land features. Each run draws as many variants as you ask for. Every symbol is built from random
+A procedural generator for hand-inked fantasy map symbols: settlements, ruins, beast lairs,
+divine sites and land features. Each run draws as many variants as you ask for. Every symbol is built from random
 parts, so no two come out the same, and the stroke weight and shading stay the same across the
 whole set. Output is transparent PNGs laid out the way Wonderdraft expects custom symbols.
 
@@ -13,7 +13,8 @@ only the bare rafters or a standing chimney.
 ![Ruined cottages, filled style](docs/cottage_filled.png)
 ![Ruined cottages, line style](docs/cottage_line.png)
 
-**Round spires**: intact, caved-in or snapped roofs, with an optional lower drum and balcony.
+**Round spires**: intact, caved-in or snapped roofs, with an optional lower drum and a corbelled
+balcony.
 
 ![Round spires, filled style](docs/round_spire_filled.png)
 ![Round spires, line style](docs/round_spire_line.png)
@@ -47,27 +48,69 @@ Then copy the pack folder from `out/` (for example `out/RuinsAndLairs/`) into Wo
 File names include the type, seed and index (`cottage_1_007.png`), so you can always regenerate a
 symbol you like.
 
-## Output
+## Output and previews
 
 ```
 out/RuinsAndLairs/sprites/symbols/<Category>/<type>_<seed>_<n>.png
 preview/<Group>/<Category>_<style>.png      contact sheet per category
 ```
 
-The contact sheets are for choosing what to keep. Categories made of several piece types (like the
-cliff curves) get one labelled row per type.
+Every run writes a contact sheet for each category it generated, so previewing a category is just
+generating it, e.g. `generate.py -t robed_statue -n 18`. The `#003` labels match the file names.
+Categories made of several piece types (like the cliff curves) get one labelled row per type.
 
 ## Categories
 
-| Group | Categories |
-|---|---|
-| Ruins | Cottages, Villages, Round Towers, Keeps, Castles, Round Spires, Gothic Spires |
-| Lairs | Hill Caves, Cliff Caves, Boulder Caves, Sunken Entrances, Burrows, Warrens, Crag Nests, Ground Nests |
-| Divine | Temples, Stone Circles, Colossi, Robed Statues, Swords, Obelisks |
-| Land | Fields, Cliffs, Steep Cliffs, Cliff Curves, Cliff Bays, Mesas, Terraced Hills, Canyons, Canyon Bends |
-
 Buildings, lairs and monuments are drawn in the same 3/4 top-down view as Wonderdraft's default
-houses.
+houses, lit from the west, so east-facing walls and slopes are hatched into shadow.
+
+**Settlements**
+- **Houses**: cottages, two-storey houses, longhouses and barns. Gables face front or side.
+  Variants add timber framing, chimneys, dormers, lean-tos, and tiled or thatched roofs.
+- **Hamlets**: 3–4 houses packed closely, sometimes with a well or a fence.
+- **Villages**: 6–12 houses along a winding road. Some have a chapel with a buttressed bell tower,
+  a well, garden fences and trees.
+- Houses and hamlets share one scale and are cropped tightly with no stray ground clutter, so you
+  can place them close together to build up a town. Some come with one or two trees (spruce,
+  cypress or a broadleaf oak).
+
+**Ruins**
+- **Cottages** and ruined **Villages**: stepped masonry breaches, partial roofs or bare rafters,
+  standing chimneys, ivy, rubble.
+- **Round Towers** and square **Keeps**.
+- **Castles**: curtain walls with battlements, corner towers and turrets, a twin-towered gatehouse
+  and a central keep.
+- **Round Spires**: wizard towers with corbelled balconies and cone roofs (intact, caved in or
+  snapped).
+- **Gothic Spires**: buttressed towers with lancet windows and a pyramid spire.
+
+**Lairs**
+- Four kinds of cave, each with a dark, jagged entrance:
+  - **Hill Caves**: a craggy hillside, with trees and a trail leading in.
+  - **Cliff Caves**: a cavern under a headland bluff.
+  - **Boulder Caves**: a grotto of tumbled megaliths under a capstone.
+  - **Sunken Entrances**: a barrow or stone stairway leading down below ground.
+- **Burrows** and **Warrens**: pits dug down into an earth bank, either a single hollow or a
+  whole colony.
+- **Crag Nests** and **Ground Nests**: woven twig eyries holding speckled eggs or bones.
+- Lairs scatter bones, skulls, ribcages, claw marks, tracks and skulls on stakes.
+
+**Divine**
+- **Temples**: Greek-style ruins on stepped platforms. Fluted columns (standing, snapped or
+  stumps), entablatures and pediments, multi-room inner halls, altars and fallen drums. Some
+  are forecourt sanctuaries or L-shaped complexes.
+- **Stone Circles**: rough-hewn standing stones, trilithon gates, an altar and a worn ring track.
+- **Colossi**: sculpted legs on a plinth, with a shattered stone face half-sunk in the earth.
+- **Robed Statues**: hooded figures in different poses on square, octagonal or round pedestals.
+  They hold staffs, greatswords, orbs, tomes or flames; some have halos, some are headless.
+- **Swords**: a giant blade planted in a cracked crater or a boulder.
+- **Obelisks**: glyph-carved, cracked or broken, sometimes with vines.
+
+**Land**
+- **Fields**: patchworks of furrows, grain, orchards, vineyards, fallow land and pasture with
+  haystacks. Edges are hedges, walls, fences or tracks.
+- **Cliffs**, **Steep Cliffs**, **Cliff Curves**, **Cliff Bays**, **Mesas**, **Terraced Hills**,
+  **Canyons** and **Canyon Bends**: see below.
 
 ## Cliffs, canyons and mountains
 
@@ -93,13 +136,15 @@ The wash is a second colour. These symbols won't tint as one colour unless you u
 | File | Contents |
 |---|---|
 | `generate.py` | CLI and the list of types (`TYPES`: category, draw function, canvas size) |
-| `wdgen/ink.py` | Canvas (ink, paper and wash layers) and the brush: tapered strokes, hatching, tufts, bushes, stones |
+| `wdgen/ink.py` | Canvas (ink, paper and wash layers) and the brush: tapered strokes, hatching, tufts, scalloped bushes, stones |
 | `wdgen/proj.py` | The 3/4 orthographic projection shared by every 3D symbol |
 | `wdgen/solids.py` | Boxes, cylinders, cones, pyramids, broken columns, earth mounds |
-| `wdgen/ruins.py` | Damaged walls, roofs, cottages, towers, keeps, villages |
-| `wdgen/castles.py` | Crenellated curtain walls, castles, spires |
-| `wdgen/lairs.py` | Caves, burrows, nests, bones and other remains |
-| `wdgen/divine.py` | Temples, stone circles, statues, swords, obelisks |
+| `wdgen/houses.py` | Intact houses (gable roofs, timber framing, dormers, lean-tos, chimneys), hamlets, villages, chapel, well |
+| `wdgen/flora.py` | Trees: spruce, cypress, broadleaf oak |
+| `wdgen/ruins.py` | Damaged walls and roofs, ivy, cottages, round towers, keeps, ruined villages |
+| `wdgen/castles.py` | Crenellated curtain walls, turrets, gatehouses, castles, round and gothic spires |
+| `wdgen/lairs.py` | 3D hills, cave portals, boulders, trails, burrow pits, nests, bones and other remains |
+| `wdgen/divine.py` | Temples (stylobates, Doric columns, entablatures, halls), stone circles, colossi, robed statues and their props, swords, obelisks |
 | `wdgen/terrain.py` | Fields, cliff edges, curves, mesas, terraced hills, canyons |
 
 To add a symbol type, write a `draw(pen, P, rng)` function (`P` projects world `(x, y, height)` to

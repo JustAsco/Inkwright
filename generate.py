@@ -6,7 +6,7 @@
     .venv/bin/python generate.py -t land                         # every Land - * category
     .venv/bin/python generate.py --style line           # transparent line art (no white fill)
 
-Symbols go to out/<pack>/sprites/symbols/<Group>/ (line style: out/<pack>Line/...),
+Symbols go to out/<pack>/sprites/symbols/<pack> - <Group>/ (line style: out/<pack>Line/.../<pack> Line - <Group>/),
 contact sheets to preview/<Group>/<Category>_<style>.png. Copy the pack folder into
 Wonderdraft's assets folder.
 """
@@ -201,7 +201,7 @@ def main():
                          "colour (like Wonderdraft's own line-art sprites); normal draws as-is")
     ap.add_argument("--refresh-meta", action="store_true",
                     help="only rewrite the .wonderdraft_symbols files for the PNGs already in --out, then exit")
-    ap.add_argument("--pack", default="RuinsAndLairs")
+    ap.add_argument("--pack", default="Inkwright", help="pack name, used for the pack folder and palette folder names")
     ap.add_argument("--out", default="out")
     ap.add_argument("--preview", default="preview")
     args = ap.parse_args()
@@ -213,10 +213,11 @@ def main():
     wash = None if args.wash == "none" else tuple(int(args.wash[i:i + 2], 16) for i in (0, 2, 4))
     paper = tuple(int(args.paper[i:i + 2], 16) for i in (0, 2, 4))
     pack = args.pack + ("" if args.style == "filled" else "Line")
+    label = args.pack + ("" if args.style == "filled" else " Line")
     by_cat = {}
     for kind in select([t.strip() for t in args.types.split(",") if t.strip()]):
         cat = TYPES[kind][0]
-        folder = Path(args.out) / pack / "sprites" / "symbols" / cat.split(" - ", 1)[0]  # one folder per group
+        folder = Path(args.out) / pack / "sprites" / "symbols" / f"{label} - {cat.split(' - ', 1)[0]}"  # one per group
         folder.mkdir(parents=True, exist_ok=True)
         imgs = []
         meta_path = folder / ".wonderdraft_symbols"

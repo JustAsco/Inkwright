@@ -1,4 +1,7 @@
-# Wonderdraft Assets
+# Inkwright
+
+A Wonderdraft asset generator.
+
 
 A procedural generator for hand-inked fantasy map symbols: settlements, ruins, beast lairs,
 divine sites and land features. Each run draws as many variants as you ask for. Every symbol is built from random
@@ -29,7 +32,7 @@ python3 -m venv .venv
 .venv/bin/python generate.py --style line    # the same, as pure line art
 ```
 
-Then copy the pack folder from `out/` (for example `out/RuinsAndLairs/`) into Wonderdraft's
+Then copy the pack folder from `out/` (for example `out/Inkwright/`) into Wonderdraft's
 `assets` folder and restart Wonderdraft.
 
 ## Options
@@ -46,7 +49,7 @@ Then copy the pack folder from `out/` (for example `out/RuinsAndLairs/`) into Wo
 | `--draw-mode` | `sample_color` | Wonderdraft `draw_mode` written to `.wonderdraft_symbols`: `sample_color` tints the white fill to the land colour underneath, `normal` draws as-is |
 | `--paper` | `ffffff` | Fill colour inside shapes (filled style) |
 | `--refresh-meta` | | Only rewrite `.wonderdraft_symbols` for the PNGs already in `out/` |
-| `--pack` | `RuinsAndLairs` | Pack folder name (the line style gets a `Line` suffix) |
+| `--pack` | `Inkwright` | Pack name, used for the pack folder and the palette folders (the line style adds `Line`) |
 
 File names include the type, seed and index (`cottage_1_007.png`), so you can always regenerate a
 symbol you like.
@@ -54,12 +57,14 @@ symbol you like.
 ## Output and previews
 
 ```
-out/RuinsAndLairs/sprites/symbols/<Group>/<type>_<seed>_<n>.png     Settlements, Ruins, Lairs, Divine, Land
-out/RuinsAndLairs/sprites/symbols/<Group>/.wonderdraft_symbols
+out/Inkwright/sprites/symbols/Inkwright - <Group>/<type>_<seed>_<n>.png
+out/Inkwright/sprites/symbols/Inkwright - <Group>/.wonderdraft_symbols
+out/InkwrightLine/sprites/symbols/Inkwright Line - <Group>/...       line style
 preview/<Group>/<Category>_<style>.png      contact sheet per category
 ```
 
-All categories of a group share one folder, so Wonderdraft shows one palette per group. The
+All categories of a group (Settlements, Ruins, Lairs, Divine, Land) share one folder, so
+Wonderdraft shows one palette per group, named like `Inkwright - Land`. The
 file names start with their type (`hill_cave_…`, `burrow_…`). Each group folder gets a
 `.wonderdraft_symbols` metadata file with an entry per image:
 

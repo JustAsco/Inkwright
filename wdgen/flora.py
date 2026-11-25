@@ -344,63 +344,28 @@ def tree(pen, x, y, h=None, kind=None):
 
 
 # --------------------------------------------------------------------------- Wonderdraft Tree Brush pool generators
-
-def _brush_cluster(pen, P, rng, fn, h_range, spread_x, cluster_prob=0.28):
-    """Draw a tightly cropped single tree OR natural 2-3 tree copse sorted back-to-front for Wonderdraft Tree Brush."""
-    cx, by = P.ox, P.oy
-    if rng.random() > cluster_prob:
-        fn(pen, cx, by, rng.uniform(*h_range))
-        return
-    # Tight 2- or 3-tree copse (frontmost tree anchored right at P.oy so Wonderdraft Y-sorting stays exact!)
-    n = int(rng.choice([2, 2, 3]))
-    pts = [(0.0, 0.0, rng.uniform(h_range[0] * 0.95, h_range[1]))]  # frontmost anchor tree at y=by
-    for k in range(1, n):
-        sgn = (-1 if k % 2 else 1) * (1 if rng.random() < 0.5 else -1) if k == 1 else (1 if pts[1][0] < 0 else -1)
-        dx = sgn * rng.uniform(spread_x * 0.65, spread_x * 1.25)
-        dy = -rng.uniform(3.5, 10.0)  # strictly behind the anchor tree!
-        dh = rng.uniform(h_range[0] * 0.78, h_range[1] * 0.96)
-        pts.append((dx, dy, dh))
-    # Draw strictly back-to-front (smaller y first, largest y = frontmost last!)
-    for dx, dy, dh in sorted(pts, key=lambda it: it[1]):
-        fn(pen, cx + dx, by + dy, dh)
-
+# Strictly single trees (no pre-grouped multi-tree clusters) so Wonderdraft's Tree Brush packs forests naturally.
 
 def pine_brush(pen, P, rng):
-    """Wonderdraft Tree Brush pool: alpine spruce/pine singles & tight copses."""
-    _brush_cluster(pen, P, rng, spruce, (34, 54), spread_x=11.0, cluster_prob=0.30)
+    """Wonderdraft Tree Brush pool: single alpine spruce/pine trees with organic height & bough variety."""
+    spruce(pen, P.ox, P.oy, rng.uniform(32, 54))
 
 
 def broadleaf_brush(pen, P, rng):
-    """Wonderdraft Tree Brush pool: billowy oak/broadleaf woodland singles & copses."""
-    _brush_cluster(pen, P, rng, round_tree, (28, 44), spread_x=12.5, cluster_prob=0.30)
+    """Wonderdraft Tree Brush pool: single billowy oak/broadleaf woodland trees."""
+    round_tree(pen, P.ox, P.oy, rng.uniform(28, 44))
 
 
 def cypress_brush(pen, P, rng):
-    """Wonderdraft Tree Brush pool: slender flame cypress singles & hillside groves."""
-    _brush_cluster(pen, P, rng, cypress, (34, 52), spread_x=7.5, cluster_prob=0.32)
+    """Wonderdraft Tree Brush pool: single slender flame cypress trees."""
+    cypress(pen, P.ox, P.oy, rng.uniform(34, 52))
 
 
 def palm_brush(pen, P, rng):
-    """Wonderdraft Tree Brush pool: curved oasis/tropical palms & outward-fanning clusters."""
-    cx, by = P.ox, P.oy
-    if rng.random() > 0.30:
-        palm(pen, cx, by, rng.uniform(36, 52))
-        return
-    # Fan palm cluster trunks outward away from the cluster centre (classic oasis silhouette, never crossing!)
-    n = int(rng.choice([2, 2, 3]))
-    if n == 2:
-        pts = [(-rng.uniform(3.5, 6.5), -rng.uniform(3.0, 7.5), rng.uniform(32, 46), -1),
-               (rng.uniform(3.5, 6.5), 0.0, rng.uniform(38, 52), 1)]
-        if rng.random() < 0.5:
-            pts[0], pts[1] = (pts[0][0], 0.0, pts[1][2], -1), (pts[1][0], -rng.uniform(3.0, 7.5), pts[0][2], 1)
-    else:
-        pts = [(-rng.uniform(5.5, 9.0), -rng.uniform(4.5, 8.5), rng.uniform(32, 44), -1),
-               (rng.uniform(5.5, 9.0), -rng.uniform(3.5, 7.5), rng.uniform(32, 45), 1),
-               (rng.normal(0, 1.5), 0.0, rng.uniform(40, 52), int(rng.choice([-1, 1])))]
-    for dx, dy, dh, ldir in sorted(pts, key=lambda it: it[1]):
-        palm(pen, cx + dx, by + dy, dh, lean_dir=ldir)
+    """Wonderdraft Tree Brush pool: single gracefully curved oasis/tropical palm trees."""
+    palm(pen, P.ox, P.oy, rng.uniform(36, 52))
 
 
 def deadwood_brush(pen, P, rng):
-    """Wonderdraft Tree Brush pool: twisted dead oaks & blasted conifer snags."""
-    _brush_cluster(pen, P, rng, deadwood, (32, 48), spread_x=11.5, cluster_prob=0.24)
+    """Wonderdraft Tree Brush pool: single twisted dead oaks & blasted conifer snags."""
+    deadwood(pen, P.ox, P.oy, rng.uniform(32, 48))

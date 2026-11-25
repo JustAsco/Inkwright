@@ -73,7 +73,8 @@ Terraforming`, `Inkwright - Land`, etc.).
 per biome or style (`Inkwright - Pines`, `Inkwright - Mountains`, `Inkwright - Hills`, etc.), so
 Wonderdraft's Tree Brush and Mountain Brush can scatter each set en masse without mixing biomes.
 File names start with their type (`pine_…`, `mountain_…`, `hill_cave_…`, `burrow_…`). Every folder
-gets a `.wonderdraft_symbols` metadata file with an entry per image:
+gets a `.wonderdraft_symbols` metadata file (a single flat pool object for `sprites/trees/` and
+`sprites/mountains/`, and a per-image dictionary for `sprites/symbols/`):
 
 - **Pivot** (`offset_x`, `offset_y`): near the bottom of the drawing, at the front ground point,
   like Wonderdraft's own sprites. Wonderdraft draws the symbol with the lower pivot in front, so
@@ -106,17 +107,20 @@ Wonderdraft's default assets, lit from the west, so east-facing walls, crowns an
 hatched into shadow.
 
 **Trees** *(Wonderdraft Tree Brush pools — `sprites/trees/`)*
-- **Pines**: tiered alpine spruce and pine singles plus tight 2–3 tree copses.
-- **Broadleaf**: multi-lobed oak and woodland deciduous canopies, singles and copses.
-- **Cypress**: slender flame cypresses and hillside groves.
-- **Palms**: curved ringed tropical/oasis palms and outward-fanning clusters.
-- **Deadwood**: twisted gnarled dead oaks and snapped conifer snags.
-- Each pool mixes ~70% singles with ~30% back-to-front copses anchored at the front trunk foot, so
-  brushing en masse builds dense, organic forests without floating gaps or seam lines.
+- **Pines**: single tiered alpine spruce and pine trees with varied heights and bough asymmetry.
+- **Broadleaf**: single multi-lobed oak and woodland deciduous canopies.
+- **Cypress**: single slender flame cypresses.
+- **Palms**: single curved ringed tropical/oasis palms.
+- **Deadwood**: single twisted gnarled dead oaks and snapped conifer snags.
+- Every tree variant is a standalone single tree anchored at the trunk foot, so Wonderdraft's Tree
+  Brush scatters organic, evenly spaced forests without repeating pre-grouped clumps.
 
 **Mountains** *(Wonderdraft Mountain Brush pools — `sprites/mountains/`)*
 - **Mountains**: 3/4 bird's-eye multi-ridged alpine massifs, staggered diagonal twin peaks and
   3-peak clusters with radiating watershed ridges and bold parallel woodcut east-facet hatching.
+- **Varied Mountains**: high-variety cartographic range pool mixing steep solitary peaks,
+  sweeping asymmetric ridge spurs, flat-topped / beveled table mountains, low broad ridges,
+  compact solo foothill peaks and asymmetric twin massifs.
 - **Crags**: steep serrated 3/4 granite spires and fractured multi-ridge crag clusters.
 - **Hills**: low, softly rounded 3/4 rolling grassy downs, twin hillocks and highland swells.
 - All mountains and hills are projected in true 3D ground depth with curved, feathered foothill

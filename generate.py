@@ -33,9 +33,10 @@ TYPES = {
     "palm": ("Trees - Palms", flora.palm_brush, 120, 120, 0.84),
     "deadwood": ("Trees - Deadwood", flora.deadwood_brush, 120, 120, 0.84),
     # mountains & hills (Wonderdraft Mountain Brush pools -> sprites/mountains/<pack> - <Name>/)
-    "mountain": ("Mountains - Mountains", mountains.mountain, 340, 240, 0.66),
-    "crag": ("Mountains - Crags", mountains.crag, 300, 260, 0.68),
-    "hill": ("Mountains - Hills", mountains.hill, 300, 180, 0.62),
+    "mountain": ("Mountains - Mountains", mountains.mountain, 390, 250, 0.66),
+    "varied_mountain": ("Mountains - Varied Mountains", mountains.varied_mountain, 410, 260, 0.66),
+    "crag": ("Mountains - Crags", mountains.crag, 330, 270, 0.68),
+    "hill": ("Mountains - Hills", mountains.hill, 310, 190, 0.62),
     # settlements
     "house": ("Settlements - Houses", houses.single_house, 200, 200, 0.62),
     "hamlet": ("Settlements - Hamlets", houses.hamlet, 280, 280, 0.58),
@@ -74,7 +75,7 @@ TYPES = {
 }
 LINE_PIECES = {"cliff", "steep_cliff", "canyon", "canyon_bend", "mesa"}
 TREE_PIECES = {"pine", "broadleaf", "cypress", "palm", "deadwood"}
-MOUNTAIN_PIECES = {"mountain", "crag", "hill"}
+MOUNTAIN_PIECES = {"mountain", "varied_mountain", "crag", "hill"}
 for _role in terrain.CLIFF_END_ROLES:
     TYPES[f"cliff_end_{_role}"] = ("Terraforming - Cliff Ends", partial(terrain.cliff_end, role=_role), 260, 220, 0.5)
     LINE_PIECES.add(f"cliff_end_{_role}")
@@ -122,13 +123,13 @@ def symbol_meta(stem, kind, i, img, pivot_x, draw_mode):
     elif kind in TREE_PIECES:
         px = (bbox[0] + bbox[2]) / 2 if pivot_x is None else pivot_x
         py = bbox[3] - max(2, 0.03 * bh)
-        # Compact trunk-core radius so Wonderdraft's Tree Brush density slider packs lush overlapping forests
-        rad = max(5, round(0.08 * bw))
+        # Balanced canopy-overlap radius (~60-70% spacing at density 1.0; neither stacked nor sparse)
+        rad = max(22, round(0.32 * bw))
     elif kind in MOUNTAIN_PIECES:
         px = (bbox[0] + bbox[2]) / 2
         py = bbox[3] - max(4, 0.16 * bh)
-        # Height-aware compact radius so Mountain Brush overlaps ranges densely both horizontally and vertically
-        rad = max(14, round(0.13 * span))
+        # Interlocking foothill radius (~45% overlap at density 1.0, midpoint between old 53 and WD default 134)
+        rad = max(28, round(0.22 * span))
     else:
         px = (bbox[0] + bbox[2]) / 2 if pivot_x is None else pivot_x
         py = bbox[3] - max(3, 0.03 * bh)
@@ -143,8 +144,28 @@ def symbol_meta(stem, kind, i, img, pivot_x, draw_mode):
     }
 
 
+def pool_meta(label_name, entries, draw_mode):
+    """Flat single-object .wonderdraft_symbols entry required by Wonderdraft for trees/ and mountains/ pools."""
+    rads = sorted(e["radius"] for e in entries)
+    oxs = sorted(e["offset_x"] for e in entries)
+    oys = sorted(e["offset_y"] for e in entries)
+    mid = len(entries) // 2
+    return {
+        "name": label_name,
+        "radius": rads[mid] if rads else 24,
+        "offset_x": oxs[mid] if oxs else 0,
+        "offset_y": oys[mid] if oys else 0,
+        "draw_mode": draw_mode,
+    }
+
+
+def _is_pool_folder(folder):
+    """Wonderdraft trees/ and mountains/ subfolders are brush pools using a flat JSON object."""
+    return folder.parent.name in ("trees", "mountains")
+
+
 def refresh_meta(out_dir, draw_mode):
-    """Rewrite every .wonderdraft_symbols under out_dir (symbols, trees & mountains) without re-rendering."""
+    """Rewrite every .wonderdraft_symbols under out_dir (flat object for trees/mountains, per-sprite dict for symbols)."""
     n = 0
     for folder in sorted(Path(out_dir).glob("*/sprites/*/*")):
         if not folder.is_dir():
@@ -154,15 +175,24 @@ def refresh_meta(out_dir, draw_mode):
             old = json.loads(meta_path.read_text()) if meta_path.exists() else {}
         except json.JSONDecodeError:
             old = {}
+        is_pool = _is_pool_folder(folder)
         meta = {}
         for png in sorted(folder.glob("*.png")):
             stem = png.stem
-            kind, _, idx = stem.rsplit("_", 2)
+            parts = stem.rsplit("_", 2)
+            if len(parts) == 3 and parts[2].isdigit():
+                kind, idx = parts[0], int(parts[2])
+            else:
+                kind, idx = ("mountain" if folder.parent.name == "mountains" else "pine" if folder.parent.name == "trees" else stem), 0
             img = Image.open(png)
-            px = img.width / 2 + old[stem]["offset_x"] if stem in old else None
-            meta[stem] = symbol_meta(stem, kind, int(idx) if idx.isdigit() else 0, img, px, draw_mode)
+            px = (img.width / 2 + old[stem]["offset_x"]) if (not is_pool and isinstance(old.get(stem), dict)) else None
+            meta[stem] = symbol_meta(stem, kind, idx, img, px, draw_mode)
             n += 1
-        meta_path.write_text(json.dumps(meta, indent=2) + "\n")
+        if is_pool:
+            out_meta = pool_meta(folder.name, list(meta.values()), draw_mode)
+        else:
+            out_meta = meta
+        meta_path.write_text(json.dumps(out_meta, indent=2) + "\n")
     return n
 
 
@@ -212,7 +242,7 @@ def category_sheet(cat, per_kind, cols=6):
             short = k.split("_", 1)[1] if "_" in k else k
             imgs += row + [None] * (cols - len(row))
             labels += [f"{short} #{i:03d}" for i in range(len(row))] + [""] * (cols - len(row))
-    bg = PARCHMENT if (cat.startswith(("Land", "Terraforming")) or cat in ("Mountains - Mountains", "Mountains - Crags")) else GRASS
+    bg = PARCHMENT if (cat.startswith(("Land", "Terraforming")) or cat in ("Mountains - Mountains", "Mountains - Varied Mountains", "Mountains - Crags")) else GRASS
     return contact_sheet(imgs, cols=cols, bg=bg, labels=labels)
 
 
@@ -266,19 +296,28 @@ def main():
         folder.mkdir(parents=True, exist_ok=True)
         imgs = []
         meta_path = folder / ".wonderdraft_symbols"
+        is_pool = _is_pool_folder(folder)
         try:
-            meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+            meta = json.loads(meta_path.read_text()) if (meta_path.exists() and not is_pool) else {}
         except json.JSONDecodeError:
             meta = {}
+        pool_entries = []
         for i in range(args.count):
             img, pivot = render(kind, args.seed * 100003 + i, args.style, args.res, ink, wash, meta=True, paper=paper)
             stem = f"{kind}_{args.seed}_{i:03d}"
             img.save(folder / f"{stem}.png")
-            meta[stem] = symbol_meta(stem, kind, i, img, pivot[0], args.draw_mode)
+            entry = symbol_meta(stem, kind, i, img, pivot[0], args.draw_mode)
+            if is_pool:
+                pool_entries.append(entry)
+            else:
+                meta[stem] = entry
             imgs.append(img)
-        # keep entries only for images that exist (other kinds share some folders)
-        meta = {k: v for k, v in sorted(meta.items()) if (folder / f"{k}.png").exists()}
-        meta_path.write_text(json.dumps(meta, indent=2) + "\n")
+        if is_pool:
+            out_meta = pool_meta(folder.name, pool_entries, args.draw_mode)
+        else:
+            # keep entries only for images that exist (other kinds share some folders)
+            out_meta = {k: v for k, v in sorted(meta.items()) if (folder / f"{k}.png").exists()}
+        meta_path.write_text(json.dumps(out_meta, indent=2) + "\n")
         by_cat.setdefault(cat, {})[kind] = imgs
         print(f"{kind:14s} -> {folder}  ({len(imgs)} symbols)")
     for cat, per_kind in by_cat.items():

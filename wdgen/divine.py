@@ -9,21 +9,34 @@ from .ruins import damage_profile, draw_wall
 from .solids import box, broken_cylinder, cylinder, hull, lying_cylinder, pyramid
 
 
-def _scatter(pen, P, rng, cx, cy, rx, ry, n=(3, 8), kinds=("tuft", "tuft", "rubble", "stone")):
+def _scatter(pen, P, rng, cx, cy, rx, ry, n=(3, 8), kinds=("tuft", "tuft", "rubble", "stone"),
+             avoid_boxes=(), avoid_circles=()):
+    """Scatter ground tufts, stones & rubble strictly on the visible front arc, outside all footprints."""
     items = []
+    placed = list(avoid_circles)
     for _ in range(rng.integers(*n)):
-        t = rng.uniform(math.pi * 0.9, math.pi * 2.1) + P.az  # mostly in front
-        d = rng.uniform(1.0, 1.35)
-        x, y = cx + rx * d * math.cos(t), cy + ry * d * math.sin(t)
-        items.append((P.depth(x, y), str(rng.choice(kinds)), (x, y)))
-    for _, kind, (x, y) in sorted(items, key=lambda it: -it[0]):
+        kind = str(rng.choice(kinds))
+        rad = rng.uniform(5.0, 9.0) if kind == "rubble" else (rng.uniform(1.6, 3.0) if kind == "stone" else 3.0)
+        pad = rad + 3.0
+        for _ in range(24):
+            t = rng.uniform(math.pi + 0.28, TAU - 0.28) + P.az
+            d = rng.uniform(1.02, 1.44)
+            x, y = cx + rx * d * math.cos(t), cy + ry * d * math.sin(t)
+            if any(b[0] - pad < x < b[2] + pad and b[1] - pad < y < b[3] + pad for b in avoid_boxes):
+                continue
+            if any(math.hypot(x - ox, y - oy) < orc + pad for ox, oy, orc in placed):
+                continue
+            placed.append((x, y, rad * 0.85))
+            items.append((P.depth(x, y), kind, (x, y, rad)))
+            break
+    for _, kind, (x, y, rad) in sorted(items, key=lambda it: -it[0]):
         sx, sy = P(x, y)
         if kind == "tuft":
             pen.tuft(sx, sy, rng.uniform(3.5, 6))
         elif kind == "rubble":
-            pen.rubble(sx, sy, rng.uniform(5, 10), rng.uniform(2.5, 4))
+            pen.rubble(sx, sy, rad, rad * 0.45)
         else:
-            pen.stone(sx, sy, rng.uniform(1.5, 3.2))
+            pen.stone(sx, sy, rad)
 
 
 def _fluted_drum(pen, P, xa, xb, y, r, h0=0.0):
@@ -181,8 +194,8 @@ def _draw_altar(pen, P, rng, cx, cy, base_h, scale=1.0):
 
 
 def _draw_cella_block(pen, P, rng, x0, y0, x1, y1, base_h, H_wall, sev, rooms=2,
-                      door_south=True, door_east=True, altar_room=0, inner_cols=False):
-    """Multi-room ruined classical ashlar cella/naos (strictly back-to-front: north -> west -> rooms & cross-walls -> east -> south)."""
+                      door_south=True, door_east=True, altar_room=0, inner_cols=False, slice_axis="x"):
+    """Multi-room ruined classical ashlar cella/naos (strictly back-to-front; slices west->east or north->south)."""
     W, D = x1 - x0, y1 - y0
     if W < 22 or D < 18:
         return
@@ -201,46 +214,76 @@ def _draw_cella_block(pen, P, rng, x0, y0, x1, y1, base_h, H_wall, sev, rooms=2,
     draw_wall(pen, Q, (x0, y1 - t), (x1, y1 - t), p_back, (0, t), shade="light")
     draw_wall(pen, Q, (x0 + t, y0), (x0 + t, y1), p_left, (-t, 0), shade="dark")
 
-    # 2. Slice interior into 1..3 chambers west -> east (west is farther, east is closer!)
-    xs = np.linspace(x0, x1, rooms + 1)
-    for r_idx in range(rooms):
-        ra, rb = float(xs[r_idx]), float(xs[r_idx + 1])
-        rmx, rmy = (ra + rb) * 0.5, (y0 + y1) * 0.5
-        rw = rb - ra
-        # Room contents: cult sanctuary altar, interior columns, offering stele, or ruined rubble
-        if r_idx == altar_room:
-            sc = min(1.15, max(0.68, min(rw, D) / 34.0))
-            if inner_cols and rw > 34 and D > 32:
-                # Pair of interior sanctuary columns flanking the cult pedestal!
-                for ic_y in (rmy + D * 0.23, rmy - D * 0.23):
-                    if ic_y > rmy:
-                        _draw_doric_col(pen, P, rng, rmx - rw * 0.22, ic_y, base_h, 2.5,
-                                        "broken" if rng.random() < 0.6 else "intact", H_wall * rng.uniform(0.45, 0.92))
-            _draw_altar(pen, P, rng, rmx, rmy, base_h, scale=sc)
-            if inner_cols and rw > 34 and D > 32:
-                _draw_doric_col(pen, P, rng, rmx + rw * 0.22, rmy - D * 0.22, base_h, 2.5,
-                                "broken", H_wall * rng.uniform(0.35, 0.72))
-        else:
-            # Secondary chamber: smaller offering plinth / treasury chest or weathered fallen drum/rubble
-            if rw > 22 and D > 22 and rng.random() < 0.62:
-                _draw_altar(pen, P, rng, rmx, rmy, base_h, scale=0.62)
-            elif rng.random() < 0.75:
-                sx, sy = P(rmx, rmy, base_h)
-                pen.rubble(sx, sy, rng.uniform(6, 11), rng.uniform(3, 5))
+    # 2. Slice interior into 1..3 chambers (either west->east OR north->south, strictly back-to-front!)
+    if slice_axis == "y":
+        ys = np.linspace(y1, y0, rooms + 1)  # north (far) -> south (near)
+        for r_idx in range(rooms):
+            yb_r, ya_r = float(ys[r_idx]), float(ys[r_idx + 1])
+            rmx, rmy = (x0 + x1) * 0.5, (ya_r + yb_r) * 0.5
+            rd = yb_r - ya_r
+            if r_idx == altar_room:
+                sc = min(1.15, max(0.68, min(W, rd) / 34.0))
+                if inner_cols and W > 34 and rd > 32:
+                    _draw_doric_col(pen, P, rng, rmx - W * 0.22, rmy + rd * 0.20, base_h, 2.5,
+                                    "broken" if rng.random() < 0.6 else "intact", H_wall * rng.uniform(0.45, 0.90))
+                _draw_altar(pen, P, rng, rmx, rmy, base_h, scale=sc)
+                if inner_cols and W > 34 and rd > 32:
+                    _draw_doric_col(pen, P, rng, rmx + W * 0.22, rmy - rd * 0.20, base_h, 2.5,
+                                    "broken", H_wall * rng.uniform(0.35, 0.72))
+            else:
+                if W > 22 and rd > 22 and rng.random() < 0.62:
+                    _draw_altar(pen, P, rng, rmx, rmy, base_h, scale=0.62)
+                elif rng.random() < 0.75:
+                    sx, sy = P(rmx, rmy, base_h)
+                    pen.rubble(sx, sy, rng.uniform(6, 11), rng.uniform(3, 5))
+            # East-west interior cross-wall separating this northern chamber from the next southern chamber
+            if r_idx < rooms - 1:
+                ym = ya_r
+                dh_p = H_wall * rng.uniform(0.76, 0.94)
+                wp_len = W - 2 * t
+                wm = wp_len * 0.5
+                dw = min(9.5, wp_len * 0.28)
+                dh_door = min(dh_p * 0.62, 13.0)
+                p_part = damage_profile(rng, wp_len, dh_p, 0, False, sev_in * 0.85, protect=(wm - dw * 1.1, wm + dw * 1.1))
+                draw_wall(pen, Q, (x0 + t, ym - t * 0.5), (x1 - t, ym - t * 0.5), p_part, (0, t),
+                          shade=None, openings=[(wm - dw * 0.5, wm + dw * 0.5, 0.0, dh_door)])
+        xs = np.array([x0, x1])
+    else:
+        xs = np.linspace(x0, x1, rooms + 1)
+        for r_idx in range(rooms):
+            ra, rb = float(xs[r_idx]), float(xs[r_idx + 1])
+            rmx, rmy = (ra + rb) * 0.5, (y0 + y1) * 0.5
+            rw = rb - ra
+            if r_idx == altar_room:
+                sc = min(1.15, max(0.68, min(rw, D) / 34.0))
+                if inner_cols and rw > 34 and D > 32:
+                    for ic_y in (rmy + D * 0.23, rmy - D * 0.23):
+                        if ic_y > rmy:
+                            _draw_doric_col(pen, P, rng, rmx - rw * 0.22, ic_y, base_h, 2.5,
+                                            "broken" if rng.random() < 0.6 else "intact", H_wall * rng.uniform(0.45, 0.92))
+                _draw_altar(pen, P, rng, rmx, rmy, base_h, scale=sc)
+                if inner_cols and rw > 34 and D > 32:
+                    _draw_doric_col(pen, P, rng, rmx + rw * 0.22, rmy - D * 0.22, base_h, 2.5,
+                                    "broken", H_wall * rng.uniform(0.35, 0.72))
+            else:
+                if rw > 22 and D > 22 and rng.random() < 0.62:
+                    _draw_altar(pen, P, rng, rmx, rmy, base_h, scale=0.62)
+                elif rng.random() < 0.75:
+                    sx, sy = P(rmx, rmy, base_h)
+                    pen.rubble(sx, sy, rng.uniform(6, 11), rng.uniform(3, 5))
 
-        # Interior cross-wall separating this room from the next room to the east, with central doorway!
-        if r_idx < rooms - 1:
-            xm = rb
-            dh_p = H_wall * rng.uniform(0.80, 0.98)
-            dp_len = D - 2 * t
-            dm = dp_len * 0.5
-            dw = min(8.5, dp_len * 0.28)
-            dh_door = min(dh_p * 0.62, 13.0)
-            p_part = damage_profile(rng, dp_len, dh_p, 0, False, sev_in * 0.80, protect=(dm - dw * 1.1, dm + dw * 1.1))
-            draw_wall(pen, Q, (xm + t * 0.5, y0 + t), (xm + t * 0.5, y1 - t), p_part, (-t, 0),
-                      shade="dark", openings=[(dm - dw * 0.5, dm + dw * 0.5, 0.0, dh_door)])
+            if r_idx < rooms - 1:
+                xm = rb
+                dh_p = H_wall * rng.uniform(0.80, 0.98)
+                dp_len = D - 2 * t
+                dm = dp_len * 0.5
+                dw = min(8.5, dp_len * 0.28)
+                dh_door = min(dh_p * 0.62, 13.0)
+                p_part = damage_profile(rng, dp_len, dh_p, 0, False, sev_in * 0.80, protect=(dm - dw * 1.1, dm + dw * 1.1))
+                draw_wall(pen, Q, (xm + t * 0.5, y0 + t), (xm + t * 0.5, y1 - t), p_part, (-t, 0),
+                          shade="dark", openings=[(dm - dw * 0.5, dm + dw * 0.5, 0.0, dh_door)])
 
-    # 3. East (right) outer cella wall (with monumental pronaos doorway if door_east)
+    # 3. East (right) outer cella wall
     ops_e = []
     prot_e = None
     if door_east and D > 24:
@@ -254,13 +297,16 @@ def _draw_cella_block(pen, P, rng, x0, y0, x1, y1, base_h, H_wall, sev, rooms=2,
     # 4. South (front) outer cella wall (lowered/breached so interior chambers & partitions stay visible!)
     ops_s = []
     if door_south and W > 28:
-        # Doorway aligned with each major chamber or center of the south wall
-        for r_idx in range(rooms):
-            if r_idx == 0 or (rooms >= 2 and rng.random() < 0.55):
-                ra, rb = float(xs[r_idx]), float(xs[r_idx + 1])
-                sm = (ra + rb) * 0.5 - x0
-                dw = min(9.5, (rb - ra) * 0.28)
-                ops_s.append((sm - dw * 0.5, sm + dw * 0.5, 0.0, min(H_wall * 0.65, 15.0)))
+        if slice_axis == "y":
+            dw = min(10.5, W * 0.28)
+            ops_s.append((W * 0.5 - dw * 0.5, W * 0.5 + dw * 0.5, 0.0, min(H_wall * 0.68, 16.0)))
+        else:
+            for r_idx in range(rooms):
+                if r_idx == 0 or (rooms >= 2 and rng.random() < 0.55):
+                    ra, rb = float(xs[r_idx]), float(xs[r_idx + 1])
+                    sm = (ra + rb) * 0.5 - x0
+                    dw = min(9.5, (rb - ra) * 0.28)
+                    ops_s.append((sm - dw * 0.5, sm + dw * 0.5, 0.0, min(H_wall * 0.65, 15.0)))
     p_front = damage_profile(rng, W, H_wall * rng.uniform(0.82, 0.98), 0, False, sev_front)
     draw_wall(pen, Q, (x0, y0), (x1, y0), p_front, (0, t), shade=None, openings=ops_s)
 
@@ -285,9 +331,13 @@ def _draw_peristyle_hall(pen, P, rng, x0, y0, x1, y1, base_h, cr, Hc, sev,
     if ped_mode == "east" and ny >= 2:
         portico_span = ("east", 0, ny)
     elif ped_mode in ("south", "north") and nx >= 3:
-        plen = min(nx, int(rng.integers(3, min(5, nx) + 1)))
-        p0 = int(rng.integers(0, nx - plen + 1))
-        portico_span = (ped_mode, p0, p0 + plen)
+        if D > W * 1.05:
+            # Deep N-S temple: full-width south or north gable pediment across the entire front facade!
+            portico_span = (ped_mode, 0, nx)
+        else:
+            plen = min(nx, int(rng.integers(3, min(5, nx) + 1)))
+            p0 = int(rng.integers(0, nx - plen + 1))
+            portico_span = (ped_mode, p0, p0 + plen)
 
     cols = {}
     for i, x in enumerate(gx):
@@ -353,13 +403,16 @@ def _draw_peristyle_hall(pen, P, rng, x0, y0, x1, y1, base_h, cr, Hc, sev,
     cx1 = gx[-1] - max(10.5, dx_bay * 0.85)
     cy0 = gy[0] + max(10.0, dy_bay * 0.78)
     cy1 = gy[-1] - max(10.0, dy_bay * 0.78)
-    if rooms > 0 and (cx1 - cx0) >= 28 and (cy1 - cy0) >= 22:
-        actual_rooms = rooms if (cx1 - cx0) >= rooms * 24 else max(1, int((cx1 - cx0) / 24))
+    if rooms > 0 and (cx1 - cx0) >= 24 and (cy1 - cy0) >= 22:
+        s_axis = "y" if (cy1 - cy0) > (cx1 - cx0) * 1.15 else "x"
+        span_main = (cy1 - cy0) if s_axis == "y" else (cx1 - cx0)
+        actual_rooms = rooms if span_main >= rooms * 24 else max(1, int(span_main / 24))
         H_wall = Hc * rng.uniform(0.62, 0.82)
         altar_room = 0 if actual_rooms == 1 else (1 if actual_rooms == 3 else int(rng.choice([0, 1])))
         _draw_cella_block(pen, P, rng, cx0, cy0, cx1, cy1, base_h, H_wall, sev,
-                          rooms=actual_rooms, door_south=(ped_mode != "east"),
-                          door_east=True, altar_room=altar_room, inner_cols=inner_cols)
+                          rooms=actual_rooms, door_south=(ped_mode != "east" or s_axis == "y"),
+                          door_east=(s_axis != "y"), altar_room=altar_room, inner_cols=inner_cols,
+                          slice_axis=s_axis)
     else:
         _draw_altar(pen, P, rng, (x0 + x1) * 0.5, (y0 + y1) * 0.5, base_h, scale=1.0)
 
@@ -395,84 +448,264 @@ def _draw_peristyle_hall(pen, P, rng, x0, y0, x1, y1, base_h, cr, Hc, sev,
                 j += 1
 
 
+def _draw_ring_beam(pen, P, xa, ya, xb, yb, hb, cr):
+    """Curved-segment classical stone architrave bridging two adjacent columns around a circular Tholos."""
+    W0 = pen.width
+    a, b = np.array([xa, ya], float), np.array([xb, yb], float)
+    u = b - a
+    L = float(np.hypot(*u))
+    if L < 2.0:
+        return
+    u /= L
+    n_out = np.array([-u[1], u[0]])
+    if float(n_out @ ((a + b) * 0.5)) < 0:
+        n_out = -n_out
+    hw = cr * 1.28
+    p0, p1 = a - u * (cr * 0.8), b + u * (cr * 0.8)
+    # 3D stone lintel prism: outer visible vertical face + top cornice slab
+    h_top = hb + 5.6
+    out_face = [P(*(p0 + n_out * hw), hb), P(*(p1 + n_out * hw), hb),
+                P(*(p1 + n_out * hw), h_top), P(*(p0 + n_out * hw), h_top)]
+    in_face = [P(*(p0 - n_out * hw), hb), P(*(p1 - n_out * hw), hb),
+               P(*(p1 - n_out * hw), h_top), P(*(p0 - n_out * hw), h_top)]
+    top_face = [P(*(p0 + n_out * hw), h_top), P(*(p1 + n_out * hw), h_top),
+                P(*(p1 - n_out * hw), h_top), P(*(p0 - n_out * hw), h_top)]
+    # Check whether outer face or inner face faces the south-east viewer (+sin az, -cos az)
+    v_xy = np.array([P.sa, -P.ca])
+    vis_face = out_face if float(n_out @ v_xy) >= 0 else in_face
+    vis_n = n_out if float(n_out @ v_xy) >= 0 else -n_out
+    pen.cv.erase(vis_face)
+    if vis_n[0] > 0.35:
+        pen.hatch(vis_face, 82, 1.7, W0 * 0.55, coverage=(0.7, 1.0))
+    pen.closed(vis_face, W0 * 0.78, wobble=0.10)
+    # Cornice step line
+    pen.stroke([P(*(p0 + vis_n * hw), hb + 4.1), P(*(p1 + vis_n * hw), hb + 4.1)], W0 * 0.42, taper=(0.05, 0.05))
+    pen.cv.erase(top_face)
+    pen.closed(top_face, W0 * 0.78, wobble=0.10)
+
+
+def _draw_tholos_rotunda(pen, P, rng, cr, Hc, sev):
+    """Ancient Greek Circular Tholos / Rotunda Sanctuary: stepped round stylobate, ring colonnade & inner cella drum."""
+    W0 = pen.width
+    R = rng.uniform(62, 74)
+    steps, sh = 3, rng.uniform(2.8, 3.3)
+    for i in range(steps):
+        cylinder(pen, P, 0.0, 0.0, R - i * 3.4, i * sh, (i + 1) * sh)
+    top = steps * sh
+    # Broad south marble stairs ascending onto the circular stylobate
+    _draw_stairs(pen, P, -18.0, -R - 3.5, 18.0, -R + steps * 3.4, 0.0, top, facing="south", n=3)
+    # Subtle radial marble floor paving lines
+    r_pave = R - steps * 3.4 - 2.0
+    for t in np.linspace(0, TAU, 12, endpoint=False):
+        if rng.random() < 0.72:
+            pen.stroke([P(math.cos(t) * r_pave * 0.45, math.sin(t) * r_pave * 0.45, top),
+                        P(math.cos(t) * r_pave, math.sin(t) * r_pave, top)], W0 * 0.30, taper=(0.3, 0.3))
+
+    # Outer ring of 10-14 fluted Doric columns around rc
+    n_cols = int(rng.choice([10, 12, 14]))
+    rc = R - steps * 3.4 - 6.8
+    cols = []
+    ang0 = -math.pi * 0.5 + math.pi / n_cols  # leaves a clear framed axial doorway facing south!
+    for i in range(n_cols):
+        t = ang0 + i * (TAU / n_cols)
+        x, y = rc * math.cos(t), rc * math.sin(t)
+        r_v = rng.random()
+        # Preserve a dramatic intact colonnade arc on the rear/flanks so surviving entablature crowns the rotunda!
+        in_arc = (0 <= i <= n_cols // 2) and rng.random() < 0.55
+        st = "intact" if (in_arc or r_v > sev * 0.88) else ("broken" if r_v > sev * 0.42 else "stump")
+        h = Hc if st == "intact" else (Hc * rng.uniform(0.28, 0.76) if st == "broken" else rng.uniform(3.0, 7.0))
+        cols.append((i, t, x, y, st, h))
+
+    # Inner circular ruined cella drum parameters
+    ri = R * 0.48
+    t_wall = 3.2
+    H_wall = Hc * rng.uniform(0.58, 0.74)
+    n_d = 72
+    th_d = np.linspace(0, TAU, n_d, endpoint=False)
+    phi = rng.uniform(0, TAU)
+    wave = 0.5 + 0.5 * np.cos(th_d - phi)
+    hs = np.clip(np.round((H_wall * (0.36 + 0.64 * (wave ** 1.1))) / 3.4) * 3.4, 5.0, H_wall)
+
+    def hat(tt):
+        return float(np.interp(tt % TAU, np.append(th_d, TAU), np.append(hs, hs[0])))
+
+    def C_drum(tt, rad, hh):
+        return P(rad * math.cos(tt), rad * math.sin(tt), top + hh)
+
+    a = P.az
+    hb = top + Hc + 2.6
+
+    # 1. Back outer columns + curved back architrave spans
+    back_cols = [c for c in cols if P.depth(c[2], c[3]) >= 0.0]
+    for _, _, x, y, st, h in sorted(back_cols, key=lambda c: -P.depth(c[2], c[3])):
+        _draw_doric_col(pen, P, rng, x, y, top, cr * 0.94, st, h)
+    for i in range(n_cols):
+        c0, c1 = cols[i], cols[(i + 1) % n_cols]
+        if (P.depth(c0[2], c0[3]) + P.depth(c1[2], c1[3])) * 0.5 >= 0.0:
+            if c0[4] == "intact" and c1[4] == "intact" and rng.random() < 0.80:
+                _draw_ring_beam(pen, P, c0[2], c0[3], c1[2], c1[3], hb, cr * 0.94)
+
+    # 2. Back half of inner circular ruined cella drum
+    back_t = np.linspace(a, a + math.pi, 36)
+    ob_top = [C_drum(tt, ri, hat(tt)) for tt in back_t]
+    ib_top = [C_drum(tt, ri - t_wall, hat(tt)) for tt in back_t]
+    ib_fl = [C_drum(tt, ri - t_wall, 0.0) for tt in back_t[::-1]]
+    pen.cv.erase(ib_top + ib_fl)
+    pen.cv.erase(ob_top + ib_top[::-1])
+    pen.hatch(ib_top + ib_fl, 80, 1.85, W0 * 0.62, coverage=(0.68, 1.0))
+    pen.stroke(ob_top, W0 * 0.78, taper=(0.02, 0.02), wobble=0.14)
+    pen.stroke(ib_top, W0 * 0.72, taper=(0.02, 0.02), wobble=0.14)
+
+    # 3. Grand central sanctuary altar + subtle interior rubble inside the rotunda
+    _draw_altar(pen, P, rng, 0.0, 0.0, top, scale=1.18)
+    if rng.random() < 0.65:
+        pen.rubble(*P(rng.uniform(-ri * 0.35, ri * 0.35), rng.uniform(-ri * 0.35, 0.0), top), 7.5, 3.2)
+
+    # 4. Front half of inner circular ruined cella drum (with arched south sanctuary entrance!)
+    front_t = np.linspace(a + math.pi, a + TAU, 36)
+    of_top = [C_drum(tt, ri, hat(tt)) for tt in front_t]
+    if_top = [C_drum(tt, ri - t_wall, hat(tt)) for tt in front_t]
+    f_body = [C_drum(tt, ri, 0.0) for tt in front_t] + of_top[::-1]
+    pen.cv.erase(of_top + if_top[::-1])
+    pen.cv.erase(f_body)
+    pen.stroke(if_top, W0 * 0.68, taper=(0.02, 0.02), wobble=0.12)
+    shade_t = np.linspace(a + TAU - 1.05, a + TAU, 18)
+    pen.hatch([C_drum(tt, ri, 0.0) for tt in shade_t] + [C_drum(tt, ri, hat(tt)) for tt in shade_t[::-1]],
+              82, 1.7, W0 * 0.68, coverage=(0.72, 1.0))
+    # South sanctuary doorway cut into front cella drum
+    td_c = -math.pi * 0.5
+    dt_d = 5.0 / ri
+    if hat(td_c) > 13.0:
+        dh_d = min(hat(td_c) - 3.0, 15.0)
+        pen.blot([C_drum(td_c - dt_d, ri, 0.0), C_drum(td_c + dt_d, ri, 0.0),
+                  C_drum(td_c + dt_d, ri, dh_d), C_drum(td_c - dt_d, ri, dh_d)], jitter=0.06)
+        pen.stroke([C_drum(td_c - dt_d * 1.25, ri, dh_d + 0.8), C_drum(td_c + dt_d * 1.25, ri, dh_d + 0.8)],
+                   W0 * 0.60, taper=(0.05, 0.05))
+    pen.stroke(of_top, W0 * 0.96, taper=(0.02, 0.02), wobble=0.16)
+    pen.stroke([C_drum(tt, ri, 0.0) for tt in front_t], W0 * 1.02, taper=(0.04, 0.04))
+
+    # 5. Front outer columns + curved front architrave spans
+    front_cols = [c for c in cols if P.depth(c[2], c[3]) < 0.0]
+    for _, _, x, y, st, h in sorted(front_cols, key=lambda c: -P.depth(c[2], c[3])):
+        _draw_doric_col(pen, P, rng, x, y, top, cr * 0.94, st, h)
+    for i in range(n_cols):
+        c0, c1 = cols[i], cols[(i + 1) % n_cols]
+        if (P.depth(c0[2], c0[3]) + P.depth(c1[2], c1[3])) * 0.5 < 0.0:
+            if c0[4] == "intact" and c1[4] == "intact" and rng.random() < 0.78:
+                _draw_ring_beam(pen, P, c0[2], c0[3], c1[2], c1[3], hb, cr * 0.94)
+
+    # Fallen fluted drums & scattered marble rubble strictly outside the circular base & south stairs
+    drum_boxes = []
+    for _ in range(rng.integers(2, 4)):
+        dl = rng.uniform(10, 15)
+        for _ in range(18):
+            fx = rng.uniform(-R * 0.80, R * 0.65)
+            fy = -R - rng.uniform(11, 20)
+            if -22 < fx + dl and fx < 22 and fy > -R - 14:
+                continue
+            dbox = (fx - 2, fy - cr - 2, fx + dl + 2, fy + cr + 2)
+            if any(not (dbox[2] < b[0] or dbox[0] > b[2] or dbox[3] < b[1] or dbox[1] > b[3]) for b in drum_boxes):
+                continue
+            drum_boxes.append(dbox)
+            _fluted_drum(pen, P, fx, fx + dl, fy, cr * 0.92, 0.0)
+            break
+    _scatter(pen, P, rng, 0, 0, R * 1.12, R * 1.12, n=(4, 9),
+             avoid_boxes=[(-22, -R - 10, 22, -R + 4)] + drum_boxes,
+             avoid_circles=[(0, 0, R + 5.0)])
+
+
 def temple(pen, P, rng):
-    """Ancient Greek temple ruins: monumental multi-room Parthenon halls, terraced forecourt sanctuaries & L-wing complexes."""
-    archetype = str(rng.choice(["grand_peripteral", "forecourt_complex", "multi_wing", "peripteral_cella"],
-                               p=[0.38, 0.22, 0.22, 0.18]))
+    """Ancient Greek temple ruins in varied footprints: wide E-W Parthenon, deep N-S hall, circular Tholos, terraced forecourt & L-wings."""
+    archetype = str(rng.choice(
+        ["grand_ew", "grand_ns", "tholos_rotunda", "forecourt_complex", "multi_wing"],
+        p=[0.22, 0.22, 0.22, 0.18, 0.16],
+    ))
     cr = rng.uniform(3.3, 4.1)
     Hc = rng.uniform(36, 46)
-    sev = rng.uniform(0.24, 0.68)
+    sev = rng.uniform(0.24, 0.66)
 
-    if archetype == "grand_peripteral":
-        # Monumental Parthenon-scale Greek temple: wide stepped stylobate, outer Doric peristyle, 2-3 chamber walled cella!
-        W = rng.uniform(164, 204)
-        D = rng.uniform(102, 128)
+    if archetype == "tholos_rotunda":
+        _draw_tholos_rotunda(pen, P, rng, cr, Hc, sev)
+        return
+
+    if archetype in ("grand_ew", "grand_ns"):
+        # Monumental Parthenon-scale Greek temple: either wide E-W OR deep N-S (opposite orientation)!
+        if archetype == "grand_ew":
+            W = rng.uniform(164, 200)
+            D = rng.uniform(98, 122)
+        else:
+            W = rng.uniform(94, 118)
+            D = rng.uniform(158, 194)
         x0, y0 = -W * 0.5, -D * 0.5
         steps, sh = 3, rng.uniform(2.8, 3.4)
         top = _draw_stylobate(pen, P, rng, x0, y0, x0 + W, y0 + D, 0.0, steps, sh)
-        # Grand marble entry staircase along the south or east facade
-        stair_east = rng.random() < 0.5
+        # Grand marble entry staircase: south on deep N-S temples, south or east on wide E-W temples
+        stair_east = (archetype == "grand_ew") and (rng.random() < 0.52)
         if stair_east:
             _draw_stairs(pen, P, x0 + W - steps * 2.8, -16, x0 + W + 4.5, 16, 0.0, top, facing="east", n=4)
         else:
             _draw_stairs(pen, P, -22, y0 - 4.5, 22, y0 + steps * 2.8, 0.0, top, facing="south", n=4)
         ins = steps * 2.8
         rooms = int(rng.choice([2, 2, 3]))
-        ped_mode = "east" if stair_east else str(rng.choice(["south", "east", "north"]))
+        if archetype == "grand_ns":
+            ped_mode = str(rng.choice(["south", "south", "north"]))
+        else:
+            ped_mode = "east" if stair_east else str(rng.choice(["south", "east", "north"]))
         _draw_peristyle_hall(pen, P, rng, x0 + ins, y0 + ins, x0 + W - ins, y0 + D - ins, top, cr, Hc, sev,
                              rooms=rooms, ped_mode=ped_mode, inner_cols=True)
-        # Fallen fluted drums outside the grand stylobate
+        avoid = [(x0 - 2, y0 - 2, x0 + W + 2, y0 + D + 2)]
+        if stair_east:
+            avoid.append((x0 + W - steps * 2.8, -18, x0 + W + 7, 18))
+        else:
+            avoid.append((-24, y0 - 7, 24, y0 + steps * 2.8))
         for _ in range(rng.integers(2, 4)):
-            fx = rng.uniform(x0 + 10, x0 + W - 26)
-            fy = y0 - rng.uniform(9, 18)
-            _fluted_drum(pen, P, fx, fx + rng.uniform(10, 16), fy, cr, 0.0)
-        _scatter(pen, P, rng, 0, 0, W * 0.52, D * 0.52, n=(4, 9))
+            dl = rng.uniform(10, 16)
+            for _ in range(18):
+                fx = rng.uniform(x0 + 6, x0 + W - 20)
+                fy = y0 - rng.uniform(11, 20)
+                dbox = (fx - 2, fy - cr - 2, fx + dl + 2, fy + cr + 2)
+                if any(not (dbox[2] < b[0] or dbox[0] > b[2] or dbox[3] < b[1] or dbox[1] > b[3]) for b in avoid):
+                    continue
+                avoid.append(dbox)
+                _fluted_drum(pen, P, fx, fx + dl, fy, cr, 0.0)
+                break
+        _scatter(pen, P, rng, 0, 0, W * 0.56, D * 0.56, n=(4, 9), avoid_boxes=avoid)
 
     elif archetype == "forecourt_complex":
-        # Two-terrace Greek Sanctuary: raised North Main Temple Hall + marble steps down to a South Peristyle Forecourt!
-        W = rng.uniform(152, 184)
-        D_main = rng.uniform(76, 94)
-        D_court = rng.uniform(56, 70)
+        # Processional North-South Two-Terrace Sanctuary: deep N-S footprint climbing from south forecourt to raised temple!
+        W = rng.uniform(122, 152)
+        D_main = rng.uniform(82, 100)
+        D_court = rng.uniform(68, 84)
         x0 = -W * 0.5
-        y_join = -8.0
-        # 1. Upper back terrace stylobate (drawn FIRST: farther from viewer!)
+        y_join = -4.0
         top_hi = _draw_stylobate(pen, P, rng, x0, y_join, x0 + W, y_join + D_main, 0.0, 4, 3.0)
-        # 2. Lower front forecourt terrace stylobate (drawn SECOND: cleanly overlaps lower south edge of upper terrace!)
         Wc = W * rng.uniform(0.92, 1.04)
         xc0 = -Wc * 0.5
         top_lo = _draw_stylobate(pen, P, rng, xc0, y_join - D_court, xc0 + Wc, y_join + 2.0, 0.0, 2, 2.8)
-        # 3. Broad central marble steps climbing from forecourt up to the raised temple sanctuary!
         _draw_stairs(pen, P, -20, y_join - 9.5, 20, y_join + 8.5, top_lo, top_hi, facing="south", n=4)
-        # Front street stairs entering the lower forecourt
         _draw_stairs(pen, P, -18, y_join - D_court - 3.5, 18, y_join - D_court + 5.6, 0.0, top_lo, facing="south", n=3)
 
-        # 4. Raised Main Temple Sanctuary (2-room cella + Doric peristyle + surviving pediment overlooking the courtyard!)
         ins_hi = 4 * 2.8
         _draw_peristyle_hall(pen, P, rng, x0 + ins_hi, y_join + ins_hi * 0.6, x0 + W - ins_hi, y_join + D_main - ins_hi,
                              top_hi, cr * 0.95, Hc * 0.96, sev, rooms=2,
-                             ped_mode=str(rng.choice(["south", "east"])), inner_cols=False)
+                             ped_mode=str(rng.choice(["south", "south", "east"])), inner_cols=False)
 
-        # 5. Lower Peristyle Forecourt / Temenos (strictly closer than upper temple!):
         ins_lo = 2 * 2.8 + 4.5
         c_xa, c_xb = xc0 + ins_lo, xc0 + Wc - ins_lo
         c_ya, c_yb = y_join - D_court + ins_lo, y_join - 8.5
         Hc_low = Hc * 0.72
-        # Optional West Treasury Chamber tucked into the left flank of the forecourt!
-        has_treasury = rng.random() < 0.65
+        has_treasury = rng.random() < 0.60
         if has_treasury:
-            tw = min(44.0, (c_xb - c_xa) * 0.30)
+            tw = min(42.0, (c_xb - c_xa) * 0.34)
             _draw_cella_block(pen, P, rng, c_xa, c_ya + 4.0, c_xa + tw, c_yb - 2.0, top_lo,
                               Hc_low * 0.80, sev, rooms=1, door_south=False, door_east=True, altar_room=0)
         else:
-            # West courtyard colonnade wing
             for y_c in np.linspace(c_yb - 4, c_ya + 4, 3):
                 st = "intact" if rng.random() > sev else "broken"
                 _draw_doric_col(pen, P, rng, c_xa + 3.0, y_c, top_lo, cr * 0.88, st,
                                 Hc_low if st == "intact" else Hc_low * rng.uniform(0.3, 0.7))
-        # Central grand open-air sacrificial altar in the forecourt plaza
-        alt_x = (c_xa + (46.0 if has_treasury else 10.0) + c_xb) * 0.5
+        alt_x = (c_xa + (44.0 if has_treasury else 10.0) + c_xb) * 0.5
         _draw_altar(pen, P, rng, alt_x, (c_ya + c_yb) * 0.5 - 2.0, top_lo, scale=1.15)
-        # East flanking courtyard colonnade
         e_ys = np.linspace(c_yb - 4, c_ya + 4, 3)
         e_sts = ["intact" if rng.random() > sev * 0.85 else "broken" for _ in e_ys]
         for y_c, st in zip(e_ys, e_sts):
@@ -480,92 +713,137 @@ def temple(pen, P, rng):
                             Hc_low if st == "intact" else Hc_low * rng.uniform(0.3, 0.75))
         if all(st == "intact" for st in e_sts):
             _draw_entablature_y(pen, P, rng, c_xb - 3.0, e_ys[-1], e_ys[0], top_lo + Hc_low + 2.6, cr * 0.88, ped=False)
-        # Front forecourt flanking gateway columns (leaving center entry stairs clear!)
-        for fx_c in (c_xa + 3.0, -24.0, 24.0, c_xb - 3.0):
-            if has_treasury and fx_c < c_xa + 42.0:
+        for fx_c in (c_xa + 3.0, -22.0, 22.0, c_xb - 3.0):
+            if has_treasury and fx_c < c_xa + 40.0:
                 continue
             st = "intact" if rng.random() > sev else "broken"
             _draw_doric_col(pen, P, rng, fx_c, c_ya, top_lo, cr * 0.88, st,
                             Hc_low if st == "intact" else Hc_low * rng.uniform(0.25, 0.72))
 
+        avoid = [
+            (x0 - 2, y_join - 2, x0 + W + 2, y_join + D_main + 2),
+            (xc0 - 2, y_join - D_court - 2, xc0 + Wc + 2, y_join + 4),
+            (-20, y_join - D_court - 6, 20, y_join - D_court + 6),
+        ]
         for _ in range(rng.integers(1, 3)):
-            fx = rng.uniform(xc0 + 10, xc0 + Wc - 22)
-            _fluted_drum(pen, P, fx, fx + rng.uniform(9, 15), y_join - D_court - rng.uniform(8, 16), cr * 0.9, 0.0)
-        _scatter(pen, P, rng, 0, 0, W * 0.54, (D_main + D_court) * 0.52, n=(4, 9))
-
-    elif archetype == "multi_wing":
-        # Erechtheion / L-Shaped Multi-Wing Acropolis Sanctuary: Grand Main Temple + Attached Perpendicular Wing Hall!
-        W1 = rng.uniform(144, 174)
-        D1 = rng.uniform(84, 102)
-        W2 = rng.uniform(66, 84)
-        D2 = rng.uniform(54, 68)
-        wing_side = str(rng.choice(["se", "sw"]))  # south-east or south-west projecting wing!
-        mx0, my0 = -W1 * 0.5, -16.0
-        mx1, my1 = mx0 + W1, my0 + D1
-        if wing_side == "se":
-            wx0, wx1 = mx1 - W2, mx1 + 6.0
-        else:
-            wx0, wx1 = mx0 - 6.0, mx0 + W2
-        wy0, wy1 = my0 - D2, my0 + 6.0
-
-        # 1. Connected stepped stylobates (Main Hall behind -> Projecting Wing in front!)
-        steps, sh = 3, rng.uniform(2.7, 3.2)
-        top1 = _draw_stylobate(pen, P, rng, mx0, my0, mx1, my1, 0.0, steps, sh)
-        top2 = _draw_stylobate(pen, P, rng, wx0, wy0, wx1, wy1, 0.0, 2, sh)
-        # Entry stairs on the open part of the main hall front
-        sx_mid = (mx0 + 28.0) if wing_side == "se" else (mx1 - 28.0)
-        _draw_stairs(pen, P, sx_mid - 16, my0 - 4.0, sx_mid + 16, my0 + steps * 2.8, 0.0, top1, facing="south", n=3)
-
-        # 2. Main Sanctuary Hall (outer colonnade + 2-room walled cella + surviving gable pediment!)
-        ins1 = steps * 2.8
-        _draw_peristyle_hall(pen, P, rng, mx0 + ins1, my0 + ins1, mx1 - ins1, my1 - ins1, top1, cr, Hc, sev,
-                             rooms=2, ped_mode=str(rng.choice(["east", "south", "north"])), inner_cols=True)
-
-        # 3. Projecting Secondary Wing / Treasury Hall & Columned Porch (strictly south of main hall!)
-        ins2 = 2 * 2.8 + 3.5
-        Hc2 = Hc * rng.uniform(0.76, 0.88)
-        cr2 = cr * 0.90
-        # Walled secondary chamber in the inner portion + Erechtheion columned front porch on the south face!
-        ch_y0 = wy0 + ins2 + 16.0
-        ch_y1 = wy1 - 5.0
-        _draw_cella_block(pen, P, rng, wx0 + ins2 + 4.0, ch_y0, wx1 - ins2 - 4.0, ch_y1, top2,
-                          Hc2 * 0.82, sev * 0.9, rooms=1, door_south=True, door_east=(wing_side == "se"), altar_room=0)
-        # Flanking side porch columns + 4-column south portico with architrave & optional mini-pediment!
-        pxs = np.linspace(wx0 + ins2, wx1 - ins2, 4)
-        p_sts = []
-        keep_portico = rng.random() < 0.72
-        for px in pxs:
-            st = "intact" if (keep_portico or rng.random() > sev) else "broken"
-            p_sts.append(st)
-            _draw_doric_col(pen, P, rng, float(px), wy0 + ins2, top2, cr2, st,
-                            Hc2 if st == "intact" else Hc2 * rng.uniform(0.3, 0.75))
-        if all(st == "intact" for st in p_sts):
-            _draw_entablature_x(pen, P, rng, float(pxs[0]), float(pxs[-1]), wy0 + ins2,
-                                top2 + Hc2 + 2.6, cr2, ped=(rng.random() < 0.75))
-
-        for _ in range(rng.integers(2, 4)):
-            fx = rng.uniform(mx0 + 6, mx1 - 20)
-            fy = wy0 - rng.uniform(8, 16)
-            _fluted_drum(pen, P, fx, fx + rng.uniform(9, 14), fy, cr, 0.0)
-        _scatter(pen, P, rng, 0, 0, W1 * 0.55, (D1 + D2) * 0.52, n=(4, 9))
+            dl = rng.uniform(9, 15)
+            for _ in range(18):
+                fx = rng.uniform(xc0 + 6, xc0 + Wc - 20)
+                fy = y_join - D_court - rng.uniform(11, 19)
+                dbox = (fx - 2, fy - cr - 2, fx + dl + 2, fy + cr + 2)
+                if any(not (dbox[2] < b[0] or dbox[0] > b[2] or dbox[3] < b[1] or dbox[1] > b[3]) for b in avoid):
+                    continue
+                avoid.append(dbox)
+                _fluted_drum(pen, P, fx, fx + dl, fy, cr * 0.9, 0.0)
+                break
+        _scatter(pen, P, rng, 0, 0, W * 0.58, (D_main + D_court) * 0.55, n=(4, 9), avoid_boxes=avoid)
 
     else:
-        # Classic Medium-Large Greek Peripteral Temple with inner ruined Cella room(s)
-        W = rng.uniform(134, 162)
-        D = rng.uniform(84, 102)
-        x0, y0 = -W * 0.5, -D * 0.5
-        steps, sh = int(rng.integers(2, 4)), rng.uniform(2.7, 3.4)
-        top = _draw_stylobate(pen, P, rng, x0, y0, x0 + W, y0 + D, 0.0, steps, sh)
-        if rng.random() < 0.65:
-            _draw_stairs(pen, P, -18, y0 - 4.0, 18, y0 + steps * 2.8, 0.0, top, facing="south", n=3)
-        ins = steps * 2.8
-        rooms = int(rng.choice([1, 2]))
-        _draw_peristyle_hall(pen, P, rng, x0 + ins, y0 + ins, x0 + W - ins, y0 + D - ins, top, cr, Hc, sev,
-                             rooms=rooms, ped_mode="auto", inner_cols=False)
-        for _ in range(rng.integers(1, 4)):
-            fx = rng.uniform(x0 + 8, x0 + W - 22)
-            _fluted_drum(pen, P, fx, fx + rng.uniform(9, 15), y0 - rng.uniform(8, 16), cr, 0.0)
-        _scatter(pen, P, rng, 0, 0, W * 0.52, D * 0.52, n=(3, 8))
+        # L-Shaped Multi-Wing Acropolis Sanctuary (balanced square/asymmetric bounding box!)
+        ns_main = rng.random() < 0.45
+        if ns_main:
+            # Tall N-S Main Hall on the west + Projecting East Shrine Wing!
+            W1, D1 = rng.uniform(86, 104), rng.uniform(146, 174)
+            W2, D2 = rng.uniform(56, 72), rng.uniform(66, 82)
+            mx0, my0 = -W1 * 0.5 - W2 * 0.25, -D1 * 0.5
+            mx1, my1 = mx0 + W1, my0 + D1
+            wx0, wx1 = mx1 - 6.0, mx1 + W2
+            wy0, wy1 = my0 + 8.0, my0 + 8.0 + D2
+            steps, sh = 3, rng.uniform(2.7, 3.2)
+            top1 = _draw_stylobate(pen, P, rng, mx0, my0, mx1, my1, 0.0, steps, sh)
+            top2 = _draw_stylobate(pen, P, rng, wx0, wy0, wx1, wy1, 0.0, 2, sh)
+            _draw_stairs(pen, P, (mx0 + mx1) * 0.5 - 16, my0 - 4.0, (mx0 + mx1) * 0.5 + 16, my0 + steps * 2.8,
+                         0.0, top1, facing="south", n=3)
+            ins1 = steps * 2.8
+            _draw_peristyle_hall(pen, P, rng, mx0 + ins1, my0 + ins1, mx1 - ins1, my1 - ins1, top1, cr, Hc, sev,
+                                 rooms=2, ped_mode="south", inner_cols=True)
+            ins2 = 2 * 2.8 + 3.5
+            Hc2, cr2 = Hc * rng.uniform(0.76, 0.88), cr * 0.90
+            _draw_cella_block(pen, P, rng, wx0 + 8.0, wy0 + ins2 + 12.0, wx1 - ins2 - 4.0, wy1 - ins2, top2,
+                              Hc2 * 0.82, sev * 0.9, rooms=1, door_south=True, door_east=True, altar_room=0)
+            pxs = np.linspace(wx0 + 10.0, wx1 - ins2, 4)
+            p_sts = []
+            keep_p = rng.random() < 0.72
+            for px in pxs:
+                st = "intact" if (keep_p or rng.random() > sev) else "broken"
+                p_sts.append(st)
+                _draw_doric_col(pen, P, rng, float(px), wy0 + ins2, top2, cr2, st,
+                                Hc2 if st == "intact" else Hc2 * rng.uniform(0.3, 0.75))
+            if all(st == "intact" for st in p_sts):
+                _draw_entablature_x(pen, P, rng, float(pxs[0]), float(pxs[-1]), wy0 + ins2,
+                                    top2 + Hc2 + 2.6, cr2, ped=(rng.random() < 0.75))
+            avoid = [
+                (mx0 - 2, my0 - 2, mx1 + 2, my1 + 2),
+                (wx0 - 2, wy0 - 2, wx1 + 2, wy1 + 2),
+                ((mx0 + mx1) * 0.5 - 18, my0 - 6, (mx0 + mx1) * 0.5 + 18, my0 + steps * 2.8),
+            ]
+            for _ in range(rng.integers(2, 4)):
+                dl = rng.uniform(9, 14)
+                for _ in range(18):
+                    fx = rng.uniform(mx0 + 6, wx1 - 18)
+                    fy = my0 - rng.uniform(11, 19)
+                    dbox = (fx - 2, fy - cr - 2, fx + dl + 2, fy + cr + 2)
+                    if any(not (dbox[2] < b[0] or dbox[0] > b[2] or dbox[3] < b[1] or dbox[1] > b[3]) for b in avoid):
+                        continue
+                    avoid.append(dbox)
+                    _fluted_drum(pen, P, fx, fx + dl, fy, cr, 0.0)
+                    break
+            _scatter(pen, P, rng, (mx0 + wx1) * 0.5, (my0 + my1) * 0.5,
+                     (W1 + W2) * 0.54, D1 * 0.56, n=(4, 9), avoid_boxes=avoid)
+        else:
+            # Classic E-W Main Hall + South-East or South-West Projecting Wing
+            W1, D1 = rng.uniform(136, 166), rng.uniform(84, 102)
+            W2, D2 = rng.uniform(66, 84), rng.uniform(56, 70)
+            wing_side = str(rng.choice(["se", "sw"]))
+            mx0, my0 = -W1 * 0.5, -14.0
+            mx1, my1 = mx0 + W1, my0 + D1
+            if wing_side == "se":
+                wx0, wx1 = mx1 - W2, mx1 + 6.0
+            else:
+                wx0, wx1 = mx0 - 6.0, mx0 + W2
+            wy0, wy1 = my0 - D2, my0 + 6.0
+            steps, sh = 3, rng.uniform(2.7, 3.2)
+            top1 = _draw_stylobate(pen, P, rng, mx0, my0, mx1, my1, 0.0, steps, sh)
+            top2 = _draw_stylobate(pen, P, rng, wx0, wy0, wx1, wy1, 0.0, 2, sh)
+            sx_mid = (mx0 + 28.0) if wing_side == "se" else (mx1 - 28.0)
+            _draw_stairs(pen, P, sx_mid - 16, my0 - 4.0, sx_mid + 16, my0 + steps * 2.8, 0.0, top1, facing="south", n=3)
+            ins1 = steps * 2.8
+            _draw_peristyle_hall(pen, P, rng, mx0 + ins1, my0 + ins1, mx1 - ins1, my1 - ins1, top1, cr, Hc, sev,
+                                 rooms=2, ped_mode=str(rng.choice(["east", "south", "north"])), inner_cols=True)
+            ins2 = 2 * 2.8 + 3.5
+            Hc2, cr2 = Hc * rng.uniform(0.76, 0.88), cr * 0.90
+            ch_y0, ch_y1 = wy0 + ins2 + 16.0, wy1 - 5.0
+            _draw_cella_block(pen, P, rng, wx0 + ins2 + 4.0, ch_y0, wx1 - ins2 - 4.0, ch_y1, top2,
+                              Hc2 * 0.82, sev * 0.9, rooms=1, door_south=True, door_east=(wing_side == "se"), altar_room=0)
+            pxs = np.linspace(wx0 + ins2, wx1 - ins2, 4)
+            p_sts = []
+            keep_portico = rng.random() < 0.72
+            for px in pxs:
+                st = "intact" if (keep_portico or rng.random() > sev) else "broken"
+                p_sts.append(st)
+                _draw_doric_col(pen, P, rng, float(px), wy0 + ins2, top2, cr2, st,
+                                Hc2 if st == "intact" else Hc2 * rng.uniform(0.3, 0.75))
+            if all(st == "intact" for st in p_sts):
+                _draw_entablature_x(pen, P, rng, float(pxs[0]), float(pxs[-1]), wy0 + ins2,
+                                    top2 + Hc2 + 2.6, cr2, ped=(rng.random() < 0.75))
+            avoid = [
+                (mx0 - 2, my0 - 2, mx1 + 2, my1 + 2),
+                (wx0 - 2, wy0 - 2, wx1 + 2, wy1 + 2),
+                (sx_mid - 18, my0 - 6, sx_mid + 18, my0 + steps * 2.8),
+            ]
+            for _ in range(rng.integers(2, 4)):
+                dl = rng.uniform(9, 14)
+                for _ in range(18):
+                    fx = rng.uniform(mx0 + 6, mx1 - 20)
+                    fy = wy0 - rng.uniform(11, 19)
+                    dbox = (fx - 2, fy - cr - 2, fx + dl + 2, fy + cr + 2)
+                    if any(not (dbox[2] < b[0] or dbox[0] > b[2] or dbox[3] < b[1] or dbox[1] > b[3]) for b in avoid):
+                        continue
+                    avoid.append(dbox)
+                    _fluted_drum(pen, P, fx, fx + dl, fy, cr, 0.0)
+                    break
+            _scatter(pen, P, rng, (mx0 + mx1) * 0.5, (wy0 + my1) * 0.5,
+                     W1 * 0.58, (D1 + D2) * 0.54, n=(4, 9), avoid_boxes=avoid)
 
 
 # --------------------------------------------------------------------------- stone circle
@@ -651,23 +929,27 @@ def stone_circle(pen, P, rng):
 
     items.append((P.depth(0, 0), "altar", (0, 0, 0)))
 
+    occ = []
     for _, kind, (x, y, idx) in sorted(items, key=lambda it: -it[0]):
         if kind == "stone":
             w, d, h = rng.uniform(9, 13.5), rng.uniform(5.0, 7.2), rng.uniform(25, 42)
             _monolith(pen, P, rng, x, y, w, d, h,
                       lean=(rng.normal(0, 3.0), rng.normal(0, 1.5)), glyph=(rng.random() < 0.35))
+            occ.append((x, y, max(w, d) * 0.72))
             if rng.random() < 0.55:
-                pen.tuft(*P(x - w * 0.45, y - d * 0.5 - 1), rng.uniform(3.5, 5.5))
+                pen.tuft(*P(x - w * 0.45, y - d * 0.5 - 2.2), rng.uniform(3.5, 5.5))
         elif kind == "fallen":
             L, w = rng.uniform(22, 32), rng.uniform(8, 11.5)
             h_f = rng.uniform(4.5, 6.5)
             box(pen, P, x - L / 2, y - w / 2, x + L / 2, y + w / 2, 0, h_f, inset=1.2)
             crack(pen, *P(x, y - w * 0.4, h_f * 0.8), 0.3, rng.uniform(6, 12), W0 * 0.42, branch=False)
-            pen.tuft(*P(x - L * 0.35, y - w * 0.6), rng.uniform(3.5, 5.2))
+            occ.append((x, y, L * 0.56))
+            pen.tuft(*P(x - L * 0.35, y - w * 0.65 - 1.5), rng.uniform(3.5, 5.2))
         elif kind == "trilithon":
             h = rng.uniform(38, 50)
             for dx in (-11, 11):
                 _monolith(pen, P, rng, x + dx, y, 8.8, 6.4, h, lean=(rng.normal(0, 1.0), 0))
+                occ.append((x + dx, y, 9.0))
             if rng.random() < 0.88:
                 # Heavy rough-hewn lintel capstone spanning the uprights
                 box(pen, P, x - 18, y - 4.2, x + 18, y + 4.2, h - 0.5, h + 6.5, inset=0.8)
@@ -677,11 +959,12 @@ def stone_circle(pen, P, rng):
             # Carved stepped ritual altar with recessed rune/offering ring
             box(pen, P, x - 16, y - 9.5, x + 16, y + 9.5, 0, 2.8, inset=0.8)
             box(pen, P, x - 13, y - 7.2, x + 13, y + 7.2, 2.8, 7.6, inset=0.6)
+            occ.append((x, y, 17.5))
             cx, cy = P(x, y, 7.6)
             pen.closed(ellipse_pts(cx, cy, 5.8, 5.8 * P.se, 16), W0 * 0.45, wobble=0.1)
             if rng.random() < 0.55:
                 pen.blot(ellipse_pts(cx + rng.normal(0, 1.5), cy, rng.uniform(2.0, 3.6), rng.uniform(1.0, 1.8), 10), jitter=0.3)
-    _scatter(pen, P, rng, 0, 0, Rc * 1.1, Rc, n=(4, 8), kinds=("tuft", "tuft", "stone"))
+    _scatter(pen, P, rng, 0, 0, Rc * 1.15, Rc * 1.05, n=(4, 8), kinds=("tuft", "tuft", "stone"), avoid_circles=occ)
 
 
 # --------------------------------------------------------------------------- colossi
@@ -861,23 +1144,30 @@ def statue_legs(pen, P, rng):
     _sculpted_leg(pen, P, rng, spread, -3.0, 14.5, hs[1], has_tunic=tunic)
 
     # Varied foreground monument debris: half-buried Ozymandias visage (~58%) and/or shattered torso block (~55%)
+    avoid_boxes = [(-35.0, -23.0, 35.0, 23.0)]
+    avoid_circles = []
     head_side = -1 if rng.random() < 0.55 else 1
-    hx_w, hy_w = head_side * rng.uniform(14, 34), -rng.uniform(33, 44)
+    hx_w, hy_w = head_side * rng.uniform(16, 36), -rng.uniform(37, 47)
     has_head = rng.random() < 0.58
     if has_head:
         hx, hy = P(hx_w, hy_w)
         _fallen_colossus_head(pen, rng, hx, hy - 4.0, tilt=head_side * rng.uniform(0.32, 0.92))
+        avoid_circles.append((hx_w, hy_w, 15.0))
     if (not has_head) or rng.random() < 0.55:
-        fx = -head_side * rng.uniform(14, 36)
-        fy = -rng.uniform(32, 43)
+        fx = -head_side * rng.uniform(16, 38)
+        fy = -rng.uniform(37, 47)
         if rng.random() < 0.55:
             # Shattered carved marble torso/plinth block lying half-buried
             L, w, h = rng.uniform(18, 26), rng.uniform(10, 14), rng.uniform(7.5, 11.5)
             box(pen, P, fx - L * 0.5, fy - w * 0.5, fx + L * 0.5, fy + w * 0.5, 0, h, inset=1.0)
             crack(pen, *P(fx, fy - w * 0.45, h * 0.85), math.pi * 0.5 + rng.normal(0, 0.3), h * 0.7, W0 * 0.46, branch=False)
+            avoid_boxes.append((fx - L * 0.5 - 2, fy - w * 0.5 - 2, fx + L * 0.5 + 2, fy + w * 0.5 + 2))
         else:
-            _fluted_drum(pen, P, fx - 10, fx + rng.uniform(8, 16), fy, rng.uniform(5.2, 7.4))
-    _scatter(pen, P, rng, 0, -10, 44, 32, n=(4, 9))
+            dr = rng.uniform(5.2, 7.4)
+            dl = rng.uniform(8, 16)
+            _fluted_drum(pen, P, fx - 10, fx + dl, fy, dr)
+            avoid_boxes.append((fx - 12, fy - dr - 2, fx + dl + 2, fy + dr + 2))
+    _scatter(pen, P, rng, 0, -10, 48, 36, n=(4, 9), avoid_boxes=avoid_boxes, avoid_circles=avoid_circles)
 
 
 def _oct_prism(pen, P, X, Y, r, h0, h1, inset=0.0, shade=True, top=True, w=None):
@@ -1965,36 +2255,25 @@ def statue_robed(pen, P, rng):
             sgn = 1 if j % 2 else -1
             pen.dab(q[0] + sgn * 1.8, q[1], rng.uniform(1.5, 2.1), angle=sgn * 0.45, w=W0 * 0.68)
 
-    # 12. Fallen sculpted fragments (headless / broken_torso)
-    fallen_pos = None
+    # 12. Fallen sculpted fragments (headless / broken_torso), cleanly south of plinth corners
+    avoid_boxes = [(-pw * 1.16, -pw * 1.16, pw * 1.16, pw * 1.16)] if plinth_kind == "square" else []
+    avoid_circles = [] if plinth_kind == "square" else [(0.0, 0.0, pw * 1.16)]
     if state in ("headless", "broken_torso") and rng.random() < 0.85:
         fx = rng.uniform(-pw * 1.15, pw * 1.15)
-        fy = -pw - rng.uniform(10.0, 17.0)
+        fy = -pw * 1.15 - rng.uniform(12.0, 18.0)
         hx, hy = P(fx, fy)
-        fallen_pos = (fx, fy)
+        avoid_circles.append((fx, fy, 13.5))
         _draw_fallen_head(pen, rng, hx, hy - 4.0, tilt=rng.choice([-1, 1]) * rng.uniform(0.45, 1.2))
         if state == "broken_torso":
             bx = -fx * rng.uniform(0.55, 0.95) + rng.uniform(-6, 6)
-            by = -pw - rng.uniform(12.0, 19.0)
-            lying_cylinder(pen, P, bx - 7.5, bx + 7.5, by, rng.uniform(5.0, 6.6))
+            by = -pw * 1.15 - rng.uniform(14.0, 20.0)
+            tr = rng.uniform(5.0, 6.6)
+            lying_cylinder(pen, P, bx - 7.5, bx + 7.5, by, tr)
+            avoid_boxes.append((bx - 9.5, by - tr - 2.0, bx + 9.5, by + tr + 2.0))
 
-    # 13. Front ground scatter (tufts, stones, rubble; avoid covering fallen head)
-    front_items = []
-    for _ in range(rng.integers(4, 9)):
-        t = rng.uniform(math.pi * 0.95, math.pi * 2.05) + P.az
-        d = rng.uniform(1.08, 1.48)
-        x, y = pw * d * math.cos(t), pw * d * math.sin(t)
-        if fallen_pos and math.hypot(x - fallen_pos[0], y - fallen_pos[1]) < 13.0:
-            continue
-        front_items.append((P.depth(x, y), str(rng.choice(["tuft", "tuft", "rubble", "stone"])), (x, y)))
-    for _, kind, (x, y) in sorted(front_items, key=lambda it: -it[0]):
-        sx, sy = P(x, y)
-        if kind == "tuft":
-            pen.tuft(sx, sy, rng.uniform(3.5, 6.0))
-        elif kind == "rubble":
-            pen.rubble(sx, sy, rng.uniform(5.0, 9.5), rng.uniform(2.5, 4.0))
-        else:
-            pen.stone(sx, sy, rng.uniform(1.5, 3.2))
+    # 13. Front ground scatter strictly outside plinth footprint & fallen fragments
+    _scatter(pen, P, rng, 0, 0, pw * 1.42, pw * 1.42, n=(4, 9),
+             avoid_boxes=avoid_boxes, avoid_circles=avoid_circles)
 
 
 def gods_sword(pen, P, rng, in_stone=None):
@@ -2228,12 +2507,16 @@ def obelisk(pen, P, rng):
         x, y = P(0, -s + s * 0.35 * frac, h)
         _glyph(pen, x, y, 4.4 * (1 - 0.28 * frac), k)
 
+    avoid_boxes = [(-s * 2.38, -s * 2.38, s * 2.38, s * 2.38)]
     if broken:
-        # Fallen pointed pyramidion tip lying crashed on the ground beside the plinth!
+        # Fallen pointed pyramidion tip lying cleanly in front of the plinth (never overlapping steps!)
         L = max(14.0, (H - top) * 0.72)
+        w_tip = (s - ins) * 1.45
         dir_x = 1 if rng.random() < 0.5 else -1
         fx = dir_x * rng.uniform(s * 1.2, s * 2.2) - (L * 0.35 if dir_x > 0 else -L * 0.35)
-        fy = -rng.uniform(s * 3.6, s * 4.8)
-        _fallen_obelisk_tip(pen, P, rng, fx, fy, L, (s - ins) * 1.45, dir_x=dir_x)
+        fy = -rng.uniform(s * 4.5, s * 5.6)
+        _fallen_obelisk_tip(pen, P, rng, fx, fy, L, w_tip, dir_x=dir_x)
+        x_tip = fx + dir_x * (L + w_tip * 1.1)
+        avoid_boxes.append((min(fx, x_tip) - 2, fy - 2, max(fx, x_tip) + 2, fy + w_tip + 3))
 
-    _scatter(pen, P, rng, 0, 0, s * 3.1, s * 3.1, n=(3, 7))
+    _scatter(pen, P, rng, 0, 0, s * 3.5, s * 3.5, n=(3, 7), avoid_boxes=avoid_boxes)

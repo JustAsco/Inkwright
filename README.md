@@ -3,10 +3,11 @@
 A Wonderdraft asset generator.
 
 
-A procedural generator for hand-inked fantasy map symbols: settlements, ruins, beast lairs,
-divine sites and land features. Each run draws as many variants as you ask for. Every symbol is built from random
-parts, so no two come out the same, and the stroke weight and shading stay the same across the
-whole set. Output is transparent PNGs laid out the way Wonderdraft expects custom symbols.
+A procedural generator for hand-inked fantasy map assets: tree and mountain brush pools,
+settlements, ruins, beast lairs, divine sites and land features. Each run draws as many variants
+as you ask for. Every sprite is built from random parts, so no two come out the same, and the
+stroke weight and shading stay the same across the whole set. Output is transparent PNGs laid out
+the way Wonderdraft expects custom symbols, trees and mountains.
 
 ## Examples
 
@@ -57,23 +58,31 @@ symbol you like.
 ## Output and previews
 
 ```
+out/Inkwright/sprites/trees/Inkwright - <Pool>/<type>_<seed>_<n>.png
+out/Inkwright/sprites/mountains/Inkwright - <Pool>/<type>_<seed>_<n>.png
 out/Inkwright/sprites/symbols/Inkwright - <Group>/<type>_<seed>_<n>.png
-out/Inkwright/sprites/symbols/Inkwright - <Group>/.wonderdraft_symbols
-out/InkwrightLine/sprites/symbols/Inkwright Line - <Group>/...       line style
+out/Inkwright/sprites/{trees,mountains,symbols}/.../.wonderdraft_symbols
+out/InkwrightLine/sprites/{trees,mountains,symbols}/Inkwright Line - ...  line style
 preview/<Group>/<Category>_<style>.png      contact sheet per category
 ```
 
-All categories of a group (Settlements, Ruins, Lairs, Divine, Land) share one folder, so
-Wonderdraft shows one palette per group, named like `Inkwright - Land`. The
-file names start with their type (`hill_cave_…`, `burrow_…`). Each group folder gets a
-`.wonderdraft_symbols` metadata file with an entry per image:
+Symbol groups (Settlements, Ruins, Lairs, Divine, Land, Terraforming) put all of their categories in
+one folder under `sprites/symbols/`, so Wonderdraft shows one palette per group (`Inkwright -
+Terraforming`, `Inkwright - Land`, etc.).
+**Trees** and **Mountains** go into `sprites/trees/` and `sprites/mountains/` with one subfolder
+per biome or style (`Inkwright - Pines`, `Inkwright - Mountains`, `Inkwright - Hills`, etc.), so
+Wonderdraft's Tree Brush and Mountain Brush can scatter each set en masse without mixing biomes.
+File names start with their type (`pine_…`, `mountain_…`, `hill_cave_…`, `burrow_…`). Every folder
+gets a `.wonderdraft_symbols` metadata file with an entry per image:
 
 - **Pivot** (`offset_x`, `offset_y`): near the bottom of the drawing, at the front ground point,
   like Wonderdraft's own sprites. Wonderdraft draws the symbol with the lower pivot in front, so
-  these layer correctly against each other and against the default sprites. Cliff and canyon
-  pieces pivot on their centre.
-- **Radius**: estimated from the drawn width. It's smaller for cliff and canyon pieces so they can
-  overlap.
+  these layer correctly against each other and against the default sprites. Mountains and hills
+  tuck their pivot slightly inside the open foothills so overlapping ranges stack cleanly; cliff
+  and canyon pieces pivot on their centre.
+- **Radius**: compact, height-aware footprint radius (tight trunk cores for trees, compact foothill
+  radii for mountains/hills, and tight bounds for symbols and terraforming pieces) so Wonderdraft's
+  automatic brush density packs forests, mountain ranges and continuous edges cleanly.
 - **draw_mode**: from `--draw-mode`, `sample_color` by default.
 
 To get symbols that look like Wonderdraft's own line-art sprites, use the **filled** style with
@@ -92,25 +101,47 @@ Categories made of several piece types (like the cliff curves) get one labelled 
 
 ## Categories
 
-Buildings, lairs and monuments are drawn in the same 3/4 top-down view as Wonderdraft's default
-houses, lit from the west, so east-facing walls and slopes are hatched into shadow.
+Buildings, lairs, monuments, trees and mountains are drawn in the same 3/4 top-down view as
+Wonderdraft's default assets, lit from the west, so east-facing walls, crowns and slopes are
+hatched into shadow.
+
+**Trees** *(Wonderdraft Tree Brush pools — `sprites/trees/`)*
+- **Pines**: tiered alpine spruce and pine singles plus tight 2–3 tree copses.
+- **Broadleaf**: multi-lobed oak and woodland deciduous canopies, singles and copses.
+- **Cypress**: slender flame cypresses and hillside groves.
+- **Palms**: curved ringed tropical/oasis palms and outward-fanning clusters.
+- **Deadwood**: twisted gnarled dead oaks and snapped conifer snags.
+- Each pool mixes ~70% singles with ~30% back-to-front copses anchored at the front trunk foot, so
+  brushing en masse builds dense, organic forests without floating gaps or seam lines.
+
+**Mountains** *(Wonderdraft Mountain Brush pools — `sprites/mountains/`)*
+- **Mountains**: 3/4 bird's-eye multi-ridged alpine massifs, staggered diagonal twin peaks and
+  3-peak clusters with radiating watershed ridges and bold parallel woodcut east-facet hatching.
+- **Crags**: steep serrated 3/4 granite spires and fractured multi-ridge crag clusters.
+- **Hills**: low, softly rounded 3/4 rolling grassy downs, twin hillocks and highland swells.
+- All mountains and hills are projected in true 3D ground depth with curved, feathered foothill
+  aprons (no flat horizontal baseline), so foreground peaks mask rear peaks cleanly while stacking
+  organically into sweeping ranges.
 
 **Settlements**
 - **Houses**: cottages, two-storey houses, longhouses and barns. Gables face front or side.
   Variants add timber framing, chimneys, dormers, lean-tos, and tiled or thatched roofs.
-- **Hamlets**: 3–4 houses packed closely, sometimes with a well or a fence.
-- **Villages**: 6–12 houses along a winding road. Some have a chapel with a buttressed bell tower,
-  a well, garden fences and trees.
+- **Hamlets**: 3–4 houses packed closely in wide, north–south or rounded yard clusters, sometimes
+  with a well or a fence.
+- **Villages**: 6–12 houses laid out along wide east–west lanes, tall north–south lanes, crossroads
+  or circular village greens. Many centre on a buttressed stone parish church (with a tall
+  cross-topped bell steeple, gothic lancets and optional cruciform transepts), plus a well, garden
+  fences and trees.
 - Houses and hamlets share one scale and are cropped tightly with no stray ground clutter, so you
   can place them close together to build up a town. Some come with one or two trees (spruce,
   cypress or a broadleaf oak).
 
 **Ruins**
 - **Cottages** and ruined **Villages**: stepped masonry breaches, partial roofs or bare rafters,
-  standing chimneys, ivy, rubble.
+  standing chimneys, ivy, rubble, and ruined parish churches with weathered or snapped steeples.
 - **Round Towers** and square **Keeps**.
-- **Castles**: curtain walls with battlements, corner towers and turrets, a twin-towered gatehouse
-  and a central keep.
+- **Castles**: wide, deep north–south, square and hexagonal ring-wall fortresses with crenellated
+  curtain walls, corner towers and turrets, a twin-towered gatehouse and a central keep.
 - **Round Spires**: wizard towers with corbelled balconies and cone roofs (intact, caved in or
   snapped).
 - **Gothic Spires**: buttressed towers with lancet windows and a pyramid spire.
@@ -121,15 +152,15 @@ houses, lit from the west, so east-facing walls and slopes are hatched into shad
   - **Cliff Caves**: a cavern under a headland bluff.
   - **Boulder Caves**: a grotto of tumbled megaliths under a capstone.
   - **Sunken Entrances**: a barrow or stone stairway leading down below ground.
-- **Burrows** and **Warrens**: pits dug down into an earth bank, either a single hollow or a
-  whole colony.
+- **Burrows**: earth-bank pits dug down into a grassy knoll, with spoil heaps, bushes, trees and
+  a worn trail.
 - **Crag Nests** and **Ground Nests**: woven twig eyries holding speckled eggs or bones.
 - Lairs scatter bones, skulls, ribcages, claw marks, tracks and skulls on stakes.
 
 **Divine**
-- **Temples**: Greek-style ruins on stepped platforms. Fluted columns (standing, snapped or
-  stumps), entablatures and pediments, multi-room inner halls, altars and fallen drums. Some
-  are forecourt sanctuaries or L-shaped complexes.
+- **Temples**: Greek-style ruins on stepped platforms in wide east–west, deep north–south, circular
+  Tholos rotunda, terraced forecourt and L-shaped layouts, with fluted columns (standing, snapped
+  or stumps), entablatures and pediments, multi-room inner halls, altars and fallen drums.
 - **Stone Circles**: rough-hewn standing stones, trilithon gates, an altar and a worn ring track.
 - **Colossi**: sculpted legs on a plinth, with a shattered stone face half-sunk in the earth.
 - **Robed Statues**: hooded figures in different poses on square, octagonal or round pedestals.
@@ -138,15 +169,17 @@ houses, lit from the west, so east-facing walls and slopes are hatched into shad
 - **Obelisks**: glyph-carved, cracked or broken, sometimes with vines.
 
 **Land**
-- **Fields**: patchworks of furrows, grain, orchards, vineyards, fallow land and pasture with
-  haystacks. Edges are hedges, walls, fences or tracks.
-- **Cliffs**, **Steep Cliffs**, **Cliff Curves**, **Cliff Bays**, **Mesas**, **Terraced Hills**,
-  **Canyons** and **Canyon Bends**: see below.
+- **Fields**: wide, north–south and rounded patchworks of furrows, grain, orchards, vineyards,
+  fallow land and pasture with haystacks. Edges are hedges, walls, fences or tracks.
 
-## Cliffs, canyons and mountains
+**Terraforming**
+- **Cliffs**, **Steep Cliffs**, **Cliff Ends**, **Cliff Curves**, **Cliff Bays**, **Mesas**,
+  **Canyons**, **Canyon Bends** and **Canyon Ends**: see below.
 
-Land edges are open lines: an ink edge, short strokes hanging below it where the cliff face is
-visible, and a fading wash. All pieces share one face-height range and have tapered, open ends,
+## Cliffs, canyons and terraforming
+
+Terraforming edges are open lines: an ink edge, short strokes hanging below it where the cliff face
+is visible, and a fading wash. All pieces share one face-height range and have tapered, open ends,
 so you build longer edges by overlapping pieces. You never need to rotate a piece.
 
 Every edge knows which side is the low ground. The face only appears where the drop faces the
@@ -156,9 +189,13 @@ viewer, and it fades out as the edge turns sideways. So:
   `curve_back`, `curve_left_end`, `curve_right_end` and the four corners. A front piece, two ends
   and a back piece make a closed ring.
 - **Cliff Bays** are the inner (concave) versions, for notches in an outline.
-- **Mesas** are a complete plateau in one symbol. **Terraced Hills** stack 2–4 of them into a
-  whole hill or mountain.
-- **Canyons** and **Canyon Bends** follow the same rules, so bends join straight runs.
+- **Cliff Ends** (`left`, `right`, `diag_nw`, `diag_se`, `diag_sw`, `diag_ne`) neutralize a cliff
+  or steep escarpment by sloping its face height and ink line smoothly back down to flat ground.
+- **Mesas** are complete flat-topped plateaus (in wide, tall and rounded shapes) that can also be
+  stacked freely to build terraced hills or stepped buttes.
+- **Canyons** and **Canyon Bends** follow the same rules so bends join straight runs, and
+  **Canyon Ends** (`left`, `right`, `north`, `south`) neutralize the start or end of a canyon via
+  converging ravine pinch-outs, closed box-canyon cliff headwalls or flared valley fade-outs.
 
 The wash is a second colour. These symbols won't tint as one colour unless you use `--wash none`.
 
@@ -171,12 +208,13 @@ The wash is a second colour. These symbols won't tint as one colour unless you u
 | `wdgen/proj.py` | The 3/4 orthographic projection shared by every 3D symbol |
 | `wdgen/solids.py` | Boxes, cylinders, cones, pyramids, broken columns, earth mounds |
 | `wdgen/houses.py` | Intact houses (gable roofs, timber framing, dormers, lean-tos, chimneys), hamlets, villages, chapel, well |
-| `wdgen/flora.py` | Trees: spruce, cypress, broadleaf oak |
+| `wdgen/flora.py` | Trees: spruce, cypress, broadleaf oak, palm, deadwood and Wonderdraft tree brush pools |
+| `wdgen/mountains.py` | Mountain brush pools: alpine mountains, jagged crags and rolling hills |
 | `wdgen/ruins.py` | Damaged walls and roofs, ivy, cottages, round towers, keeps, ruined villages |
 | `wdgen/castles.py` | Crenellated curtain walls, turrets, gatehouses, castles, round and gothic spires |
 | `wdgen/lairs.py` | 3D hills, cave portals, boulders, trails, burrow pits, nests, bones and other remains |
 | `wdgen/divine.py` | Temples (stylobates, Doric columns, entablatures, halls), stone circles, colossi, robed statues and their props, swords, obelisks |
-| `wdgen/terrain.py` | Fields, cliff edges, curves, mesas, terraced hills, canyons |
+| `wdgen/terrain.py` | Fields (`Land`) and stackable cliffs, cliff ends, curves, bays, mesas, canyons and canyon ends (`Terraforming`) |
 
 To add a symbol type, write a `draw(pen, P, rng)` function (`P` projects world `(x, y, height)` to
 the canvas, and `pen` draws strokes) and add it to `TYPES` in `generate.py`.

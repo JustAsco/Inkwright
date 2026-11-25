@@ -20,22 +20,32 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-from wdgen import castles, divine, houses, lairs, ruins, terrain
+from wdgen import castles, divine, flora, houses, lairs, mountains, ruins, terrain
 from wdgen.ink import Canvas, Pen
 from wdgen.proj import Proj
 
 # name -> (category folder, draw fn, canvas w, canvas h[, ground line as fraction of h])
 TYPES = {
+    # trees (Wonderdraft Tree Brush pools -> sprites/trees/<pack> - <Name>/)
+    "pine": ("Trees - Pines", flora.pine_brush, 120, 120, 0.84),
+    "broadleaf": ("Trees - Broadleaf", flora.broadleaf_brush, 120, 120, 0.84),
+    "cypress": ("Trees - Cypress", flora.cypress_brush, 110, 120, 0.84),
+    "palm": ("Trees - Palms", flora.palm_brush, 120, 120, 0.84),
+    "deadwood": ("Trees - Deadwood", flora.deadwood_brush, 120, 120, 0.84),
+    # mountains & hills (Wonderdraft Mountain Brush pools -> sprites/mountains/<pack> - <Name>/)
+    "mountain": ("Mountains - Mountains", mountains.mountain, 340, 240, 0.66),
+    "crag": ("Mountains - Crags", mountains.crag, 300, 260, 0.68),
+    "hill": ("Mountains - Hills", mountains.hill, 300, 180, 0.62),
     # settlements
     "house": ("Settlements - Houses", houses.single_house, 200, 200, 0.62),
-    "hamlet": ("Settlements - Hamlets", houses.hamlet, 260, 240, 0.6),
-    "town_village": ("Settlements - Villages", houses.village, 420, 340, 0.58),
+    "hamlet": ("Settlements - Hamlets", houses.hamlet, 280, 280, 0.58),
+    "town_village": ("Settlements - Villages", houses.village, 420, 400, 0.56),
     # ruins
     "cottage": ("Ruins - Cottages", ruins.ruined_cottage, 260, 220),
-    "village": ("Ruins - Villages", ruins.ruined_village, 420, 320),
+    "village": ("Ruins - Villages", ruins.ruined_village, 420, 380, 0.58),
     "round_tower": ("Ruins - Round Towers", ruins.ruined_tower, 220, 260),
     "keep": ("Ruins - Keeps", ruins.ruined_keep, 220, 260),
-    "castle": ("Ruins - Castles", castles.castle, 400, 400, 0.66),
+    "castle": ("Ruins - Castles", castles.castle, 420, 420, 0.62),
     "round_spire": ("Ruins - Round Spires", partial(castles.spire, kind="round"), 200, 340, 0.86),
     "gothic_spire": ("Ruins - Gothic Spires", partial(castles.spire, kind="gothic"), 200, 340, 0.86),
     # lairs
@@ -43,30 +53,37 @@ TYPES = {
     "cliff_cave": ("Lairs - Cliff Caves", lairs.cliff_cave, 280, 240, 0.75),
     "boulder_cave": ("Lairs - Boulder Caves", lairs.boulder_cave, 280, 220),
     "sunken_cave": ("Lairs - Sunken Entrances", lairs.low_entrance, 280, 200),
-    "burrow": ("Lairs - Burrows", partial(lairs.burrow_lair, warren=False), 260, 200),
-    "warren": ("Lairs - Warrens", partial(lairs.burrow_lair, warren=True), 300, 220),
+    "burrow": ("Lairs - Burrows", lairs.burrow_lair, 260, 200),
     "crag_nest": ("Lairs - Crag Nests", partial(lairs.nest_lair, crag=True), 240, 240),
     "ground_nest": ("Lairs - Ground Nests", partial(lairs.nest_lair, crag=False), 240, 200),
     # divine
-    "temple": ("Divine - Temples", divine.temple, 420, 340, 0.64),
+    "temple": ("Divine - Temples", divine.temple, 420, 400, 0.60),
     "stone_circle": ("Divine - Stone Circles", divine.stone_circle, 300, 260, 0.62),
     "colossus": ("Divine - Colossi", divine.statue_legs, 260, 300, 0.75),
     "robed_statue": ("Divine - Robed Statues", divine.statue_robed, 220, 300, 0.8),
     "sword": ("Divine - Swords", divine.gods_sword, 220, 260, 0.82),
     "obelisk": ("Divine - Obelisks", divine.obelisk, 200, 300, 0.8),
     # land
-    "field": ("Land - Fields", terrain.fields, 320, 240, 0.5),
-    "cliff": ("Land - Cliffs", terrain.cliff, 280, 200, 0.5),
-    "steep_cliff": ("Land - Steep Cliffs", terrain.cliff_steep, 260, 260, 0.5),
-    "canyon": ("Land - Canyons", terrain.canyon, 300, 200, 0.5),
-    "canyon_bend": ("Land - Canyon Bends", terrain.canyon_bend, 300, 240, 0.5),
-    "mesa": ("Land - Mesas", terrain.mesa, 260, 200, 0.5),
-    "terraced_hill": ("Land - Terraced Hills", terrain.terraced_hill, 280, 260, 0.55),
+    "field": ("Land - Fields", terrain.fields, 340, 320, 0.5),
+    # terraforming (stackable cliffs, mesas, canyons & neutralizing end-caps)
+    "cliff": ("Terraforming - Cliffs", terrain.cliff, 280, 200, 0.5),
+    "steep_cliff": ("Terraforming - Steep Cliffs", terrain.cliff_steep, 260, 260, 0.5),
+    "canyon": ("Terraforming - Canyons", terrain.canyon, 300, 200, 0.5),
+    "canyon_bend": ("Terraforming - Canyon Bends", terrain.canyon_bend, 300, 240, 0.5),
+    "mesa": ("Terraforming - Mesas", terrain.mesa, 260, 240, 0.5),
 }
-LINE_PIECES = {"cliff", "steep_cliff", "canyon", "canyon_bend", "mesa", "terraced_hill"}
+LINE_PIECES = {"cliff", "steep_cliff", "canyon", "canyon_bend", "mesa"}
+TREE_PIECES = {"pine", "broadleaf", "cypress", "palm", "deadwood"}
+MOUNTAIN_PIECES = {"mountain", "crag", "hill"}
+for _role in terrain.CLIFF_END_ROLES:
+    TYPES[f"cliff_end_{_role}"] = ("Terraforming - Cliff Ends", partial(terrain.cliff_end, role=_role), 260, 220, 0.5)
+    LINE_PIECES.add(f"cliff_end_{_role}")
+for _role in terrain.CANYON_END_ROLES:
+    TYPES[f"canyon_end_{_role}"] = ("Terraforming - Canyon Ends", partial(terrain.canyon_end, role=_role), 260, 240, 0.5)
+    LINE_PIECES.add(f"canyon_end_{_role}")
 for _role in terrain.ARC_ROLES:
-    TYPES[f"curve_{_role}"] = ("Land - Cliff Curves", partial(terrain.cliff_curve, role=_role), 260, 220, 0.5)
-    TYPES[f"bay_{_role}"] = ("Land - Cliff Bays", partial(terrain.cliff_curve, role=_role, inner=True), 260, 220, 0.5)
+    TYPES[f"curve_{_role}"] = ("Terraforming - Cliff Curves", partial(terrain.cliff_curve, role=_role), 260, 220, 0.5)
+    TYPES[f"bay_{_role}"] = ("Terraforming - Cliff Bays", partial(terrain.cliff_curve, role=_role, inner=True), 260, 220, 0.5)
     LINE_PIECES |= {f"curve_{_role}", f"bay_{_role}"}
 
 
@@ -91,19 +108,35 @@ def symbol_meta(stem, kind, i, img, pivot_x, draw_mode):
 
     Like Wonderdraft's own sprites, the pivot sits near the bottom of the drawing (the front ground
     point): Wonderdraft draws whichever symbol has the lower pivot in front. Open cliff/canyon
-    pieces pivot on their centre instead so they chain naturally.
+    pieces pivot on their centre instead so they chain naturally. Trees and mountains use tighter
+    radii so Wonderdraft's brush tools pack and overlap them organically into forests and ranges.
     """
     w, h = img.size
     bbox = img.getchannel("A").point(lambda v: 255 if v > 10 else 0).getbbox() or (0, 0, w, h)
+    bw, bh = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    # Compact footprint measure so wide shapes (mountains, hills, villages, fields) don't get oversized circular radii
+    span = min(bw, bh * 1.35)
     if kind in LINE_PIECES:
         px, py = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
+        rad = max(8, round(0.10 * span))
+    elif kind in TREE_PIECES:
+        px = (bbox[0] + bbox[2]) / 2 if pivot_x is None else pivot_x
+        py = bbox[3] - max(2, 0.03 * bh)
+        # Compact trunk-core radius so Wonderdraft's Tree Brush density slider packs lush overlapping forests
+        rad = max(5, round(0.08 * bw))
+    elif kind in MOUNTAIN_PIECES:
+        px = (bbox[0] + bbox[2]) / 2
+        py = bbox[3] - max(4, 0.16 * bh)
+        # Height-aware compact radius so Mountain Brush overlaps ranges densely both horizontally and vertically
+        rad = max(14, round(0.13 * span))
     else:
         px = (bbox[0] + bbox[2]) / 2 if pivot_x is None else pivot_x
-        py = bbox[3] - max(3, 0.03 * (bbox[3] - bbox[1]))
+        py = bbox[3] - max(3, 0.03 * bh)
+        rad = max(10, round(0.18 * span))
     px, py = min(max(px, 0), w), min(max(py, 0), h)
     return {
         "name": f"{kind.replace('_', ' ').title()} {i + 1}",
-        "radius": max(8, round((0.12 if kind in LINE_PIECES else 0.35) * (bbox[2] - bbox[0]))),
+        "radius": rad,
         "offset_x": round(px - w / 2),
         "offset_y": round(h / 2 - py),
         "draw_mode": draw_mode,
@@ -111,9 +144,11 @@ def symbol_meta(stem, kind, i, img, pivot_x, draw_mode):
 
 
 def refresh_meta(out_dir, draw_mode):
-    """Rewrite every .wonderdraft_symbols under out_dir from the PNGs already there (no re-render)."""
+    """Rewrite every .wonderdraft_symbols under out_dir (symbols, trees & mountains) without re-rendering."""
     n = 0
-    for folder in sorted(Path(out_dir).glob("*/sprites/symbols/*")):
+    for folder in sorted(Path(out_dir).glob("*/sprites/*/*")):
+        if not folder.is_dir():
+            continue
         meta_path = folder / ".wonderdraft_symbols"
         try:
             old = json.loads(meta_path.read_text()) if meta_path.exists() else {}
@@ -177,8 +212,18 @@ def category_sheet(cat, per_kind, cols=6):
             short = k.split("_", 1)[1] if "_" in k else k
             imgs += row + [None] * (cols - len(row))
             labels += [f"{short} #{i:03d}" for i in range(len(row))] + [""] * (cols - len(row))
-    bg = PARCHMENT if cat.startswith("Land") else GRASS
+    bg = PARCHMENT if (cat.startswith(("Land", "Terraforming")) or cat in ("Mountains - Mountains", "Mountains - Crags")) else GRASS
     return contact_sheet(imgs, cols=cols, bg=bg, labels=labels)
+
+
+def sprite_folder(out_dir, pack, label, cat):
+    """Route Trees -> sprites/trees/<pool>/, Mountains -> sprites/mountains/<pool>/, others -> sprites/symbols/<group>/."""
+    group, name = cat.split(" - ", 1)
+    if group == "Trees":
+        return Path(out_dir) / pack / "sprites" / "trees" / f"{label} - {name}"
+    if group == "Mountains":
+        return Path(out_dir) / pack / "sprites" / "mountains" / f"{label} - {name}"
+    return Path(out_dir) / pack / "sprites" / "symbols" / f"{label} - {group}"
 
 
 def main():
@@ -217,7 +262,7 @@ def main():
     by_cat = {}
     for kind in select([t.strip() for t in args.types.split(",") if t.strip()]):
         cat = TYPES[kind][0]
-        folder = Path(args.out) / pack / "sprites" / "symbols" / f"{label} - {cat.split(' - ', 1)[0]}"  # one per group
+        folder = sprite_folder(args.out, pack, label, cat)
         folder.mkdir(parents=True, exist_ok=True)
         imgs = []
         meta_path = folder / ".wonderdraft_symbols"

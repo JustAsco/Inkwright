@@ -4,7 +4,8 @@ import math
 import numpy as np
 
 from .ink import TAU, clip_halfplane
-from .solids import box
+from .proj import sort_boxes
+from .solids import box, pyramid
 
 
 def _lerp(a, b, t):
@@ -295,6 +296,10 @@ def draw_house(pen, P, X0, Y0, pl, exterior=True):
     def Q(x, y, h=0.0):
         return P(X0 + x, Y0 + y, h)
 
+    # Back exterior shrubs (west/north sides) drawn BEFORE walls so walls cleanly occlude them
+    if exterior:
+        house_exterior_back(pen, P, X0, Y0, pl)
+
     # Stepped foundation plinth on keeps
     if pl["keep"]:
         box(pen, P, X0 - 2.2 * k, Y0 - 2.2 * k, X0 + W + 2.2 * k, Y0 + D + 2.2 * k, 0, 4.0 * k, inset=1.0 * k)
@@ -311,20 +316,22 @@ def draw_house(pen, P, X0, Y0, pl, exterior=True):
                 if prof_at(wl["back"], s) > hf + 4 and rng.random() < 0.6:
                     pen.beam(Q(s, D - t, hf), Q(s, D - t - rng.uniform(3.5, 8.5), hf - rng.uniform(0, 1.5)), 1.3)
 
+    cw = rng.uniform(6, 8) * k if pl["chimney"] else 0.0
+    # interior debris & collapsed roof timber (drawn BEFORE chimney & kept clear of it)
+    if pl["sev"] > 0.25 and W > 2 * t + 14 and D > 2 * t + 10:
+        x_lo = t + (cw + 5.0 if (pl["chimney"] and pl["ridge_x"]) else 6.0)
+        y_hi = D - t - (cw + 5.0 if (pl["chimney"] and not pl["ridge_x"]) else 5.0)
+        if x_lo < W - t - 6 and t + 4 < y_hi:
+            for _ in range(rng.integers(1, 3)):
+                cx, cy = Q(rng.uniform(x_lo, W - t - 6), rng.uniform(t + 4, y_hi))
+                pen.rubble(cx, cy, rng.uniform(5, 9) * k, rng.uniform(2.5, 4.0) * k, rmax=2.5)
     if pl["chimney"]:
-        cw = rng.uniform(6, 8) * k
         hc = H + R + rng.uniform(-5, 6) * k
         if pl["ridge_x"]:
             _chimney(pen, Q, t, D / 2 - cw / 2, cw, hc)
         else:
             _chimney(pen, Q, W / 2 - cw / 2, D - t - cw, cw, hc)
-
-    # interior debris & collapsed roof timber
-    if pl["sev"] > 0.25 and W > 2 * t + 14 and D > 2 * t + 10:
-        for _ in range(rng.integers(1, 3)):
-            cx, cy = Q(rng.uniform(t + 6, W - t - 6), rng.uniform(t + 4, D - t - 4))
-            pen.rubble(cx, cy, rng.uniform(5, 10) * k, rng.uniform(2.5, 4.5) * k, rmax=2.6)
-    if pl["roof"] != "partial" and rng.random() < 0.55 and W > 2 * t + 10:
+    if pl["roof"] != "none" and pl["roof"] != "partial" and rng.random() < 0.55 and W > 2 * t + 10:
         x = rng.uniform(t + 4, W - t - 4)
         hb = prof_at(wl["back"], x)
         pen.beam(Q(x, D - t, min(hb, H) - 1), Q(x + rng.uniform(-12, 12), rng.uniform(t, D * 0.5), 0), 1.6)
@@ -339,10 +346,11 @@ def draw_house(pen, P, X0, Y0, pl, exterior=True):
         S2 = lambda u, v: _lerp(Q(-2, u * D, eave), Q(W / 2, u * D, H + R), v)
     Lr = W if pl["ridge_x"] else D
 
-    draw_wall(pen, Q, (W, 0), (W, D), wl["right"], (-t, 0), shade="dark", openings=ops["right"], arched=pl["keep"])
+    arched = pl["keep"] or pl.get("arched", False)
+    draw_wall(pen, Q, (W, 0), (W, D), wl["right"], (-t, 0), shade="dark", openings=ops["right"], arched=arched)
     if pl["roof"] != "none" and not pl["ridge_x"]:
         draw_roof(pen, S, S2, *pl["roof_u"], pl["roof"], pl["hi_broken"], Lr)
-    draw_wall(pen, Q, (0, 0), (W, 0), wl["front"], (0, t), shade=None, openings=ops["front"], arched=pl["keep"])
+    draw_wall(pen, Q, (0, 0), (W, 0), wl["front"], (0, t), shade=None, openings=ops["front"], arched=arched)
     if pl["roof"] != "none" and pl["ridge_x"]:
         draw_roof(pen, S, S2, *pl["roof_u"], pl["roof"], pl["hi_broken"], Lr)
 
@@ -363,38 +371,72 @@ def draw_house(pen, P, X0, Y0, pl, exterior=True):
             _ivy(pen, pts)
 
     if exterior:
-        house_exterior(pen, P, X0, Y0, pl)
+        house_exterior_front(pen, P, X0, Y0, pl)
 
 
-def house_exterior(pen, P, X0, Y0, pl):
+def house_exterior_back(pen, P, X0, Y0, pl):
+    """Exterior foliage tucked behind the west or north walls (drawn BEFORE the building so walls occlude it)."""
+    rng = pen.rng
+    W, D, k = pl["W"], pl["D"], pl["k"]
+    plinth = 2.6 * k if pl["keep"] else 0.0
+    if rng.random() < 0.45:
+        br = rng.uniform(5.2, 8.2) * k
+        if rng.random() < 0.70:
+            # West flank shrub peeking out from behind the left wall
+            bx = -plinth - br * 0.55 - rng.uniform(1.0, 3.0) * k
+            by = rng.uniform(D * 0.08, D * 0.48)
+        else:
+            # North-east shoulder peeking from behind the far-right corner
+            bx = W + plinth + rng.uniform(1.5, 4.0) * k
+            by = D + plinth + rng.uniform(1.0, 3.5) * k
+        pen.bush(*P(X0 + bx, Y0 + by), br, outline=True)
+
+
+def house_exterior_front(pen, P, X0, Y0, pl, y_pad=0.0):
+    """Exterior rubble, tufts, shrubs & fallen timbers strictly in front of south & east walls."""
     rng = pen.rng
     W, D, H, k, wl = pl["W"], pl["D"], pl["H"], pl["k"], pl["walls"]
+    plinth = (2.8 * k if pl["keep"] else 0.0) + y_pad
     items = []
 
     def weighted_s(prof, L):
-        sc = np.linspace(4, L - 4, 24)
+        sc = np.linspace(5, max(6, L - 5), 24)
         wts = np.array([max(0.0, H - prof_at(prof, s)) + 1.0 for s in sc]) ** 2
         return float(rng.choice(sc, p=wts / wts.sum()))
 
     n_piles = int(rng.integers(1, 3) + (pl["sev"] > 0.6))
     for _ in range(n_piles):
-        if rng.random() < 0.6:
-            x, y = weighted_s(wl["front"], W), -rng.uniform(3, 7) * k
+        rx = rng.uniform(6.5, 13.0) * k * (0.6 + pl["sev"])
+        if rng.random() < 0.62:
+            x = weighted_s(wl["front"], W)
+            y = -plinth - rx * 0.48 - rng.uniform(2.8, 6.0) * k
         else:
-            x, y = W + rng.uniform(3, 7) * k, weighted_s(wl["right"], D)
-        rx = rng.uniform(7, 14) * k * (0.6 + pl["sev"])
+            x = W + plinth + rx * 0.58 + rng.uniform(2.5, 5.5) * k
+            y = min(D - 6.0, weighted_s(wl["right"], D))
         items.append((P.depth(X0 + x, Y0 + y), "rubble", (x, y, rx)))
-    for _ in range(rng.integers(3, 8)):
-        if rng.random() < 0.6:
-            x, y = rng.uniform(-4, W + 4), -rng.uniform(1, 9)
+    for _ in range(rng.integers(3, 7)):
+        if rng.random() < 0.62:
+            x, y = rng.uniform(0.0, W + 3.0), -plinth - rng.uniform(2.2, 9.5) * k
         else:
-            x, y = W + rng.uniform(1, 9), rng.uniform(-2, D)
+            x, y = W + plinth + rng.uniform(2.5, 9.5) * k, rng.uniform(-2.0, D - 5.0)
         items.append((P.depth(X0 + x, Y0 + y), "tuft", (x, y, 0)))
-    for _ in range(rng.integers(0, 3)):
-        corner = [(-3, -3), (W + 3, -3), (W + 3, D - 4), (-4, D * 0.3)][rng.integers(0, 4)]
-        items.append((P.depth(X0 + corner[0], Y0 + corner[1]), "bush", (*corner, rng.uniform(5, 8.5) * k)))
+    if rng.random() < 0.48:
+        br = rng.uniform(4.8, 7.6) * k
+        # Strictly in front of SE corner or front-left SW ground (NEVER on west or NE wall!)
+        if rng.random() < 0.60:
+            bx, by = W + plinth + br * 0.55 + 2.2 * k, -plinth - br * 0.45 - 2.0 * k
+        else:
+            bx, by = rng.uniform(-1.0, W * 0.22), -plinth - br * 0.65 - 3.5 * k
+        items.append((P.depth(X0 + bx, Y0 + by), "bush", (bx, by, br)))
     if rng.random() < 0.35:
-        items.append((P.depth(X0 + W * 0.5, Y0 - 8), "beam", (rng.uniform(0, W * 0.6), -rng.uniform(5, 10), 0)))
+        # Project BOTH endpoints in world space strictly south of the front wall so beam never pierces wall!
+        ln = rng.uniform(14, 24) * k
+        bx0 = rng.uniform(2.0, max(3.0, W - ln * 0.8))
+        by0 = -plinth - rng.uniform(7.5, 11.5) * k
+        ang = rng.uniform(-0.22, 0.22)
+        bx1 = bx0 + math.cos(ang) * ln
+        by1 = min(-plinth - 6.0 * k, by0 + math.sin(ang) * ln * 0.35)
+        items.append((P.depth(X0 + (bx0 + bx1) * 0.5, Y0 + (by0 + by1) * 0.5), "beam", (bx0, by0, (bx1, by1))))
 
     for _, kind, (x, y, r) in sorted(items, key=lambda it: -it[0]):
         sx, sy = P(X0 + x, Y0 + y)
@@ -405,9 +447,10 @@ def house_exterior(pen, P, X0, Y0, pl):
         elif kind == "bush":
             pen.bush(sx, sy, r, outline=True)
         elif kind == "beam":
-            ln = rng.uniform(14, 24) * k
-            a = rng.uniform(-0.4, 0.4)
-            pen.beam((sx, sy), (sx + math.cos(a) * ln, sy + math.sin(a) * ln * 0.4), 1.8)
+            pen.beam((sx, sy), P(X0 + r[0], Y0 + r[1]), 1.8)
+
+
+house_exterior = house_exterior_front
 
 
 def ruined_cottage(pen, P, rng):
@@ -422,7 +465,7 @@ def ruined_keep(pen, P, rng):
 
 # --------------------------------------------------------------------------- round tower
 
-def ruined_tower(pen, P, rng, X0=0.0, Y0=0.0, k=1.0):
+def ruined_tower(pen, P, rng, X0=0.0, Y0=0.0, k=1.0, exterior=True):
     """Ruined cylindrical stone watchtower with stepped masonry breaches (no banana spikes or rim gaps)."""
     cv, W0 = pen.cv, pen.width
     r, H, t = rng.uniform(14, 20) * k, rng.uniform(44, 76) * k, rng.uniform(2.8, 3.8) * k
@@ -456,6 +499,12 @@ def ruined_tower(pen, P, rng, X0=0.0, Y0=0.0, k=1.0):
 
     back = np.linspace(a, a + math.pi, 52)
     front = np.linspace(a + math.pi, a + TAU, 52)
+
+    # Rear exterior shrubs drawn BEFORE cylinder right behind left/right tangent so they hug the ground
+    if exterior and rng.random() < 0.38:
+        tt_b = a + math.pi * rng.choice([rng.uniform(0.92, 0.99), rng.uniform(0.01, 0.08)])
+        br = rng.uniform(5.2, 8.2) * k
+        pen.bush(*C(tt_b, r + br * 0.55 + 1.5 * k, 0), br, outline=True)
 
     # Far half: properly closed wall-top strip (eliminates green transparency gaps!) + shadowed inner face
     outer_back_top = [C(tt, r, hat(tt)) for tt in back]
@@ -505,9 +554,11 @@ def ruined_tower(pen, P, rng, X0=0.0, Y0=0.0, k=1.0):
         if hat(tt) > h1 + 3.5:
             dt = 1.15 / r
             pen.blot([C(tt - dt, r, h0), C(tt + dt, r, h0), C(tt + dt, r, h1), C(tt - dt, r, h1)], jitter=0.05)
+    door_tt = None
     if rng.random() < 0.6:
         tt, dt = a + 1.5 * math.pi + rng.uniform(-0.3, 0.25), 4.0 / r
         if hat(tt) > 16:
+            door_tt = tt
             arch = [C(tt - dt, r, 0)] + [C(tt + dt * math.cos(q), r, 9.5 + 3.2 * math.sin(q)) for q in np.linspace(math.pi, 0, 7)] + [C(tt + dt, r, 0)]
             pen.blot(arch, jitter=0.08)
             pen.stroke([C(tt + dt * 1.18 * math.cos(q), r, 9.5 + 3.8 * math.sin(q)) for q in np.linspace(math.pi, 0, 7)],
@@ -534,21 +585,44 @@ def ruined_tower(pen, P, rng, X0=0.0, Y0=0.0, k=1.0):
     pen.stroke([C(tt, r, 0) for tt in front], W0 * 1.15, taper=(0.05, 0.05))
     pen.stroke([C(tt, r * 1.03, 2.2) for tt in front], W0 * 0.5, taper=(0.15, 0.15), wobble=0.1)
 
-    # Debris, tufts, and outlined leafy shrubs around the collapsed base
+    if not exterior:
+        return
+
+    # Front debris, tufts, and leafy shrubs strictly in front of the cylinder base (never clipping rim/door)
+    fg = []
     fall = phi + math.pi
     for _ in range(rng.integers(1, 4)):
         tt = fall + rng.normal(0, 0.6)
-        d = r + rng.uniform(4, 12) * k
-        x, y = P(X0 + d * math.cos(tt), Y0 + d * math.sin(tt))
-        if math.sin(tt - a) < 0.2:
-            pen.rubble(x, y, rng.uniform(6, 12) * k, rng.uniform(3, 5) * k)
+        if math.sin(tt - a) > -0.24:
+            tt = rng.uniform(a + math.pi + 0.28, a + TAU - 0.28)
+        rx_r = rng.uniform(5.5, 10.5) * k
+        d = r + rx_r * 0.55 + rng.uniform(3.0, 9.0) * k
+        wx, wy = X0 + d * math.cos(tt), Y0 + d * math.sin(tt)
+        fg.append((P.depth(wx, wy), "rubble", (wx, wy, rx_r)))
     for _ in range(rng.integers(2, 6)):
-        tt = rng.uniform(a + math.pi, a + TAU)
-        x, y = C(tt, r + rng.uniform(1, 5), 0)
-        pen.tuft(x, y + 1, rng.uniform(3.5, 6))
-    if rng.random() < 0.5:
-        x, y = C(a + math.pi * rng.choice([1.15, 1.85]), r + 3, 0)
-        pen.bush(x, y + 2, rng.uniform(5.5, 8.8) * k, outline=True)
+        tt = rng.uniform(a + math.pi + 0.25, a + TAU - 0.25)
+        d = r + rng.uniform(2.5, 6.5) * k
+        wx, wy = X0 + d * math.cos(tt), Y0 + d * math.sin(tt)
+        fg.append((P.depth(wx, wy), "tuft", (wx, wy, 0.0)))
+    if rng.random() < 0.42:
+        br = rng.uniform(4.8, 7.6) * k
+        cands = [a + math.pi * 1.24, a + math.pi * 1.78]
+        if door_tt is not None:
+            cands.sort(key=lambda tt: -abs((tt - door_tt + math.pi) % TAU - math.pi))
+            tt_s = cands[0]
+        else:
+            tt_s = float(rng.choice(cands))
+        d = r + br * 0.65 + 3.2 * k
+        wx, wy = X0 + d * math.cos(tt_s), Y0 + d * math.sin(tt_s)
+        fg.append((P.depth(wx, wy), "bush", (wx, wy, br)))
+    for _, kind, (wx, wy, rad) in sorted(fg, key=lambda it: -it[0]):
+        sx, sy = P(wx, wy)
+        if kind == "rubble":
+            pen.rubble(sx, sy, rad, rad * 0.45)
+        elif kind == "tuft":
+            pen.tuft(sx, sy, rng.uniform(3.5, 6))
+        else:
+            pen.bush(sx, sy, rad, outline=True)
 
 
 def ruined_tower_any(pen, P, rng):
@@ -616,76 +690,285 @@ def ruined_fence(pen, P, A, B):
         pen.beam(b, t, 1.4)
 
 
-def ruined_village(pen, P, rng):
+def plan_ruined_church(rng, k=0.78):
+    """Plan a ruined medieval village parish church: stone nave + broken west bell tower."""
+    sev = rng.uniform(0.32, 0.78)
+    W = rng.uniform(54, 68) * k
+    D = rng.uniform(24, 30) * k
+    H = rng.uniform(19, 25) * k
+    R = (D / 2) * rng.uniform(0.95, 1.25)
+    t = rng.uniform(2.6, 3.4) * max(k, 0.82)
+    roof = str(rng.choice(["partial", "rafters", "none"], p=[0.40, 0.38, 0.22]))
+    hi_broken = rng.random() < 0.65  # tend to preserve roof toward tower end or east end
+    roof_u = protect = None
+    if roof != "none":
+        span = rng.uniform(0.36, 0.65)
+        roof_u = (0.0, span) if hi_broken else (1 - span, 1.0)
+        protect = (roof_u[0] * W - 3, roof_u[1] * W + 3)
+    allw = (-1e9, 1e9)
+    g_lo = allw if roof_u and roof_u[0] == 0 else None
+    g_hi = allw if roof_u and roof_u[1] == 1 else None
+    walls = dict(
+        front=damage_profile(rng, W, H, R, False, sev, protect),
+        back=damage_profile(rng, W, H, R, False, sev, protect),
+        left=damage_profile(rng, D, H, R, True, sev * 0.7, g_lo),
+        right=damage_profile(rng, D, H, R, True, sev, g_hi),
+    )
+    # Tall gothic lancet windows + arched portal along the nave south face
+    n_win = max(3, int(W / (14 * k)))
+    slots = np.linspace(0, W, n_win + 2)[1:-1]
+    ww, wh, sill = 3.4 * k, 9.0 * k, H * 0.26
+    front_ops = []
+    for i, s in enumerate(slots):
+        if i == 0:
+            front_ops.append((s - ww * 0.75, s + ww * 0.75, 0.0, min(H * 0.72, wh * 1.45)))
+        else:
+            front_ops.append((s - ww * 0.5, s + ww * 0.5, sill, sill + wh))
+    right_ops = [(D * 0.5 - ww * 0.65, D * 0.5 + ww * 0.65, sill * 0.9, sill * 0.9 + wh * 1.15)]
+    tw = rng.uniform(16, 20) * k
+    th = rng.uniform(52, 68) * k
+    tower_state = str(rng.choice(["steeple_broken", "steeple_intact", "breached"], p=[0.42, 0.28, 0.30]))
+    return dict(
+        W=W, D=D, H=H, R=R, t=t, k=k, sev=sev, ridge_x=True, roof=roof, roof_u=roof_u,
+        hi_broken=hi_broken, walls=walls, ops=dict(front=front_ops, right=right_ops),
+        keep=False, arched=True, chimney=False, ivy=rng.random() < 0.70,
+        tw=tw, th=th, tower_state=tower_state,
+    )
+
+
+def draw_ruined_church(pen, P, X0, Y0, pl, exterior=True):
+    """Draw a ruined village church: weathered/broken west bell tower with crooked cross + ruined gothic nave."""
+    rng, W0 = pen.rng, pen.width
+    W, D, H, k = pl["W"], pl["D"], pl["H"], pl["k"]
+    tw, th = pl["tw"], pl["th"]
+    tx0, tx1 = X0 - tw * 0.85, X0 + tw * 0.15
+    ty0, ty1 = Y0 + (D - tw) * 0.5, Y0 + (D + tw) * 0.5
+    tx, ty = (tx0 + tx1) * 0.5, (ty0 + ty1) * 0.5
+
+    # 1. Ruined west bell tower (strictly west/behind the nave in az=28° view)
+    state = pl["tower_state"]
+    if state == "breached":
+        # Open breached stone belfry shell with stepped masonry collapse & gothic belfry lancets
+        t_sev = rng.uniform(0.32, 0.58)
+        tt = 2.6 * max(k, 0.85)
+        bw = tw * 0.22
+        b_ops = [(tw * 0.30 - bw * 0.5, tw * 0.30 + bw * 0.5, th * 0.56, th * 0.76),
+                 (tw * 0.70 - bw * 0.5, tw * 0.70 + bw * 0.5, th * 0.56, th * 0.76)]
+        r_ops = [(tw * 0.50 - bw * 0.55, tw * 0.50 + bw * 0.55, th * 0.56, th * 0.76)]
+        tpl = dict(
+            W=tw, D=tw, H=th, R=0.0, t=tt, k=k, sev=t_sev, ridge_x=True, roof="none", roof_u=None,
+            hi_broken=True, keep=True, arched=True, chimney=False, ivy=rng.random() < 0.55,
+            walls=dict(
+                front=damage_profile(rng, tw, th, 0.0, False, t_sev),
+                back=damage_profile(rng, tw, th, 0.0, False, t_sev),
+                left=damage_profile(rng, tw, th, 0.0, False, t_sev),
+                right=damage_profile(rng, tw, th, 0.0, False, t_sev),
+            ),
+            ops=dict(front=b_ops, right=r_ops),
+        )
+        draw_house(pen, P, tx0, ty0, tpl, exterior=False)
+    else:
+        # Standing stone bell tower with cracked belfry & intact or shattered steeple + crooked cross!
+        box(pen, P, tx0 - 1.3 * k, ty0 - 1.3 * k, tx1 + 1.3 * k, ty1 + 1.3 * k, 0, th * 0.22)
+        box(pen, P, tx0, ty0, tx1, ty1, 0, th)
+        pen.stroke([P(tx0, ty0, th * 0.65), P(tx1, ty0, th * 0.65)], W0 * 0.52, taper=(0.05, 0.05))
+        # Twin arched gothic belfry openings on south face
+        bh = th * 0.19
+        bw = tw * 0.18
+        for off in (-tw * 0.20, tw * 0.20):
+            bx = tx + off
+            pen.blot([P(bx - bw * 0.5, ty0, th * 0.72), P(bx + bw * 0.5, ty0, th * 0.72),
+                      P(bx + bw * 0.5, ty0, th * 0.72 + bh * 0.72), P(bx, ty0, th * 0.72 + bh * 1.08),
+                      P(bx - bw * 0.5, ty0, th * 0.72 + bh * 0.72)], jitter=0.05)
+        # Masonry cracks & creeping ivy up the ruined tower
+        pen.stroke([P(tx0 + tw * 0.28, ty0, th * 0.58), P(tx0 + tw * 0.35, ty0, th * 0.42),
+                    P(tx0 + tw * 0.26, ty0, th * 0.28)], W0 * 0.44, taper=(0.1, 0.7), wobble=0.14)
+        if state == "steeple_intact":
+            apex = th + rng.uniform(22, 30) * k
+            pyramid(pen, P, tx0 - 1.0 * k, ty0 - 1.0 * k, tx1 + 1.0 * k, ty1 + 1.0 * k, th, apex)
+            # Slightly leaning iron cross atop the old weathered steeple
+            ax, ay = P(tx, ty, apex)
+            lean = rng.uniform(-1.6, 1.8)
+            ch = 8.5 * max(k, 0.85)
+            pen.stroke([(ax, ay), (ax + lean, ay - ch)], W0 * 0.66, taper=(0.0, 0.15), wobble=0)
+            pen.stroke([(ax + lean * 0.68 - ch * 0.34, ay - ch * 0.68 + lean * 0.15),
+                        (ax + lean * 0.68 + ch * 0.34, ay - ch * 0.68 - lean * 0.15)],
+                       W0 * 0.58, taper=(0.1, 0.1), wobble=0)
+        else:
+            # Shattered / snapped skeletal timber steeple frame sticking out of the belfry!
+            apex = th + rng.uniform(16, 24) * k
+            for cx_c, cy_c in ((tx0, ty0), (tx1, ty0), (tx1, ty1), (tx0, ty1)):
+                frac = rng.uniform(0.52, 0.96)
+                px = cx_c + (tx - cx_c) * frac
+                py = cy_c + (ty - cy_c) * frac
+                pz = th + (apex - th) * frac
+                pen.beam(P(cx_c, cy_c, th), P(px, py, pz), 1.35)
+            # Partial broken shingle skirt on the west side of the spire
+            sh_top = th + (apex - th) * 0.42
+            px_a = tx0 + (tx - tx0) * 0.42
+            py_a = ty0 + (ty - ty0) * 0.42
+            skirt = [P(tx0 - 0.8, ty0 - 0.8, th), P(tx1 + 0.8, ty0 - 0.8, th),
+                     P(tx1 - (tx1 - tx) * 0.38, ty0 + (ty - ty0) * 0.38, sh_top), P(px_a, py_a, sh_top)]
+            pen.cv.erase(skirt)
+            pen.hatch(skirt, 74, 2.0, W0 * 0.46, coverage=(0.45, 0.85))
+            pen.closed(skirt, W0 * 0.72, wobble=0.14)
+            # Crooked broken cross leaning from the snapped peak
+            ax, ay = P(tx, ty, th + (apex - th) * 0.78)
+            pen.stroke([(ax, ay), (ax + 2.4, ay - 6.8)], W0 * 0.58, taper=(0.0, 0.2), wobble=0)
+            pen.stroke([(ax - 0.8, ay - 4.6), (ax + 4.0, ay - 3.6)], W0 * 0.52, taper=(0.1, 0.1), wobble=0)
+
+    # 2. Ruined gothic stone nave with arched lancets & south buttresses
+    draw_house(pen, P, X0, Y0, pl, exterior=False)
+    for frac in (0.20, 0.52, 0.82):
+        bx = X0 + W * frac
+        bh_b = min(H * 0.68, prof_at(pl["walls"]["front"], W * frac) - 2.0)
+        if bh_b > 5.0:
+            box(pen, P, bx - 1.2 * k, Y0 - 2.0 * k, bx + 1.2 * k, Y0 + 0.4, 0, bh_b, inset=0.4 * k)
+    if exterior:
+        house_exterior_front(pen, P, X0, Y0, pl, y_pad=2.5 * k)
+
+
+def _ruined_track(pen, P, rng, pts_world, half_w=3.0):
+    """Faint broken overgrown village track along world polyline `pts_world`."""
     W0 = pen.width
-    # Faint broken overgrown village track winding through the ruins
-    L = rng.uniform(160, 210)
-    xs = np.linspace(-L / 2, L / 2, 40)
-    road = rng.uniform(6, 14) * np.sin(xs / L * math.pi * rng.uniform(1, 1.8) + rng.uniform(0, TAU))
-    for off in (-3.0, 3.0):
-        pts = [P(x, y + off) for x, y in zip(xs, road)]
+    pts_w = np.asarray(pts_world, float)
+    tang = np.gradient(pts_w, axis=0)
+    nrm = np.stack([-tang[:, 1], tang[:, 0]], axis=1)
+    nrm /= np.maximum(1e-6, np.hypot(nrm[:, 0], nrm[:, 1]))[:, None]
+    for sgn in (-1.0, 1.0):
+        edge = [P(*(p + n * (sgn * half_w))) for p, n in zip(pts_w, nrm)]
         i = 0
-        while i < len(pts) - 3:
-            j = min(len(pts), i + int(rng.integers(5, 13)))
+        while i < len(edge) - 3:
+            j = min(len(edge), i + int(rng.integers(5, 13)))
             if rng.random() < 0.65:
-                pen.stroke(pts[i:j], W0 * 0.42, taper=(0.35, 0.35), wobble=0.45)
+                pen.stroke(edge[i:j], W0 * 0.42, taper=(0.35, 0.35), wobble=0.45)
             i = j + int(rng.integers(2, 5))
 
-    n = int(rng.integers(3, 6))
+
+def ruined_village(pen, P, rng):
+    """Ruined village in three varied shapes: wide (E-W), tall (screen-vertical N-S), or round/crossroads."""
+    shape = str(rng.choice(["wide", "tall", "round"], p=[0.34, 0.33, 0.33]))
+    if shape == "wide":
+        L = rng.uniform(160, 210)
+        xs = np.linspace(-L / 2, L / 2, 40)
+        ys = rng.uniform(6, 14) * np.sin(xs / L * math.pi * rng.uniform(1, 1.8) + rng.uniform(0, TAU))
+        _ruined_track(pen, P, rng, np.stack([xs, ys], axis=1))
+    elif shape == "tall":
+        L = rng.uniform(155, 195)
+        ys = np.linspace(-L / 2, L / 2, 40)
+        xs = -0.44 * ys + rng.uniform(6, 12) * np.sin(ys / L * math.pi * rng.uniform(1, 1.6) + rng.uniform(0, TAU))
+        _ruined_track(pen, P, rng, np.stack([xs, ys], axis=1))
+    else:
+        L1 = rng.uniform(120, 155)
+        xs1 = np.linspace(-L1 / 2, L1 / 2, 30)
+        ys1 = rng.uniform(3, 8) * np.sin(xs1 / L1 * math.pi + rng.uniform(0, TAU))
+        L2 = rng.uniform(115, 150)
+        ys2 = np.linspace(-L2 / 2, L2 / 2, 30)
+        xs2 = -0.44 * ys2 + rng.uniform(3, 8) * np.sin(ys2 / L2 * math.pi + rng.uniform(0, TAU))
+        _ruined_track(pen, P, rng, np.stack([xs1, ys1], axis=1))
+        _ruined_track(pen, P, rng, np.stack([xs2, ys2], axis=1))
+
     placed = []
-    for _ in range(250):
+    items = []
+    # ~55% of ruined villages have a ruined parish church centerpiece!
+    if rng.random() < 0.55:
+        cpl = plan_ruined_church(rng, k=rng.uniform(0.72, 0.84))
+        if shape == "wide":
+            cx, cy = rng.uniform(-34, 18), rng.uniform(10, 34)
+        elif shape == "tall":
+            cy = rng.uniform(18, 52)
+            cx = -0.44 * cy + rng.uniform(-22, 16) - cpl["W"] * 0.4
+        else:
+            cx, cy = rng.uniform(-32, 10), rng.uniform(14, 42)
+        cbox = (cx - cpl["tw"] - 12, cy - 12, cx + cpl["W"] + 10, cy + cpl["D"] + 14)
+        placed.append((cpl, (cx, cy), cbox))
+        c_fp = (cx - cpl["tw"] * 0.90, cy - 2.5, cx + cpl["W"] + 1.5, cy + cpl["D"] + 1.5)
+        items.append((c_fp, ("church", (cpl, cx, cy))))
+
+    n = int(rng.integers(3, 6)) + (1 if items else 0)
+    for _ in range(320):
         if len(placed) >= n:
             break
         k = rng.uniform(0.62, 0.85)
         pl = plan_house(rng, k=k)
-        X, Y = rng.uniform(-90, 50), rng.uniform(-55, 35)
+        if shape == "wide":
+            X, Y = rng.uniform(-90, 50), rng.uniform(-45, 30)
+        elif shape == "tall":
+            cy_h = rng.uniform(-82, 68)
+            cx_h = -0.44 * cy_h + rng.uniform(-48, 48)
+            X, Y = cx_h - pl["W"] / 2, cy_h - pl["D"] / 2
+        else:
+            ang = rng.uniform(0, TAU)
+            rad = rng.uniform(22, 74)
+            cx_h = rad * math.cos(ang) * 0.92 - 0.22 * rad * math.sin(ang)
+            cy_h = rad * math.sin(ang) * 1.02
+            X, Y = cx_h - pl["W"] / 2, cy_h - pl["D"] / 2
         b_box = (X - 8, Y - 10, X + pl["W"] + 8, Y + pl["D"] + 8)
         if all(b_box[2] < b[0] or b_box[0] > b[2] or b_box[3] < b[1] or b_box[1] > b[3] for _, _, b in placed):
             placed.append((pl, (X, Y), b_box))
-    items = [(P.depth(X + pl["W"] / 2, Y + pl["D"] / 2), "house", (pl, X, Y)) for pl, (X, Y), _ in placed]
+            items.append(((X, Y, X + pl["W"], Y + pl["D"]), ("house", (pl, X, Y))))
+
+    bx0 = min(b[0] for _, _, b in placed)
+    bx1 = max(b[2] for _, _, b in placed)
+    by0 = min(b[1] for _, _, b in placed)
+    by1 = max(b[3] for _, _, b in placed)
+
+    # Actual tight building footprints for accurate clearance & 3D occlusion sorting
+    bldg_fps = [it[0] for it in items]
 
     def free(x, y, m=6):
-        return all(not (b[0] - m < x < b[2] + m and b[1] - m < y < b[3] + m) for _, _, b in placed)
+        return all(not (fp[0] - m < x < fp[2] + m and fp[1] - m < y < fp[3] + m) for fp in bldg_fps)
 
     for _ in range(40):
-        x, y = rng.uniform(-70, 80), rng.uniform(-50, 50)
-        if free(x, y, 10):
+        x, y = rng.uniform(bx0, bx1), rng.uniform(by0, by1)
+        if free(x, y, 12):
             if rng.random() < 0.72:
-                items.append((P.depth(x, y), "well", (x, y)))
+                wfp = (x - 7.0, y - 7.0, x + 7.0, y + 7.0)
+                bldg_fps.append(wfp)
+                items.append((wfp, ("well", (x, y))))
             break
     for _ in range(int(rng.integers(1, 4))):
         for _ in range(30):
-            x, y = rng.uniform(-90, 90), rng.uniform(-60, 60)
+            x, y = rng.uniform(bx0 - 8, bx1 + 8), rng.uniform(by0 - 8, by1 + 8)
             ang = rng.choice([0, math.pi / 2]) + rng.normal(0, 0.1)
-            fl = rng.uniform(25, 48)
+            fl = rng.uniform(22, 42)
             x2, y2 = x + math.cos(ang) * fl, y + math.sin(ang) * fl
-            if free(x, y, 3) and free(x2, y2, 3) and free((x + x2) / 2, (y + y2) / 2, 3):
-                items.append((P.depth((x + x2) / 2, (y + y2) / 2), "fence", ((x, y), (x2, y2))))
+            if free(x, y, 5) and free(x2, y2, 5) and free((x + x2) / 2, (y + y2) / 2, 5):
+                ffp = (min(x, x2) - 1.0, min(y, y2) - 1.0, max(x, x2) + 1.0, max(y, y2) + 1.0)
+                items.append((ffp, ("fence", ((x, y), (x2, y2)))))
                 break
-    for _ in range(int(rng.integers(4, 9))):
-        x, y = rng.uniform(-90, 100), rng.uniform(-60, 60)
-        if free(x, y, 2):
-            kind = rng.choice(["rubble", "tuft", "tuft", "bush"])
-            items.append((P.depth(x, y), str(kind), (x, y)))
+    # Scatter rubble, tufts & shrubs strictly outside building footprints (sorted via 3D box DAG!)
+    for _ in range(int(rng.integers(8, 14))):
+        kind = str(rng.choice(["rubble", "rubble", "tuft", "tuft", "tuft", "bush"]))
+        rad = rng.uniform(5.5, 9.5) if kind == "rubble" else (rng.uniform(4.8, 7.4) if kind == "bush" else 3.0)
+        for _ in range(18):
+            x, y = rng.uniform(bx0 - 10, bx1 + 10), rng.uniform(by0 - 10, by1 + 10)
+            if free(x, y, rad + 3.5):
+                items.append(((x - rad, y - rad * 0.6, x + rad, y + rad * 0.6), (kind, (x, y, rad))))
+                break
     if rng.random() < 0.65:
         for _ in range(int(rng.integers(1, 3))):
-            x, y = rng.uniform(-90, 100), rng.uniform(-60, 60)
-            if free(x, y, 5):
-                items.append((P.depth(x, y), "tree", (x, y)))
+            for _ in range(18):
+                x, y = rng.uniform(bx0 - 10, bx1 + 10), rng.uniform(by0 - 10, by1 + 10)
+                if free(x, y, 8.0):
+                    items.append(((x - 4.5, y - 4.5, x + 4.5, y + 4.5), ("tree", (x, y))))
+                    break
 
-    for _, kind, args in sorted(items, key=lambda it: -it[0]):
+    for kind, args in sort_boxes(P, items):
         if kind == "house":
-            draw_house(pen, P, args[1], args[2], args[0])
+            draw_house(pen, P, args[1], args[2], args[0], exterior=False)
+        elif kind == "church":
+            draw_ruined_church(pen, P, args[1], args[2], args[0], exterior=False)
         elif kind == "well":
             ruined_well(pen, P, *args)
         elif kind == "fence":
             ruined_fence(pen, P, *args)
         elif kind == "rubble":
-            pen.rubble(*P(*args), rng.uniform(5, 10), rng.uniform(2.5, 4))
+            pen.rubble(*P(args[0], args[1]), args[2], args[2] * 0.45)
         elif kind == "tuft":
-            pen.tuft(*P(*args), rng.uniform(3.5, 6))
+            pen.tuft(*P(args[0], args[1]), rng.uniform(3.5, 6))
         elif kind == "bush":
-            pen.bush(*P(*args), rng.uniform(5, 8.5), outline=True)
+            pen.bush(*P(args[0], args[1]), args[2], outline=True)
         elif kind == "tree":
             x, y = P(*args)
             pen.dead_tree(x, y, rng.uniform(18, 30), lean=rng.normal(0, 0.15))

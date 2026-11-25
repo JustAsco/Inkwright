@@ -60,8 +60,10 @@ def spruce(pen, x, y, h):
                 pen.dab(bx, by, sz, angle=side * 0.38 + rng.normal(0, 0.12),
                         w=W0 * (1.0 if side > 0 else 0.72))
 
-    # Crisp outer bough strokes along the shadowed right edge & lower skirt
-    pen.stroke([(x - w * 0.4, y + 0.2), (x + w * 0.45, y + 0.2)], W0 * 0.55, taper=(0.35, 0.35), wobble=0.1)
+    # Crisp outer bough strokes along both edges so overlapping brushed pines separate cleanly!
+    pen.stroke([(x + lean, top - 0.8)] + left[1::2], W0 * 0.52, taper=(0.25, 0.35), wobble=0.14)
+    pen.stroke([(x + lean, top - 0.8)] + right[1::2], W0 * 0.68, taper=(0.25, 0.25), wobble=0.14)
+    pen.stroke([(x - w * 0.36, y + 0.2), (x + w * 0.42, y + 0.2)], W0 * 0.50, taper=(0.40, 0.40), wobble=0.1)
 
 
 def cypress(pen, x, y, h):
@@ -91,9 +93,9 @@ def cypress(pen, x, y, h):
     pen.stroke([(x, y), (x, y - trunk_h - 1.5)], W0 * 0.95, taper=(0.0, 0.35), wobble=0.08)
 
     # Vertical-angled dark shadow strokes on the east/right half of the cypress
-    sh = clip_halfplane(sil, np.array([1.0, 0.08]), x + lean * 0.4 + w * 0.05)
+    sh = clip_halfplane(sil, np.array([1.0, 0.08]), x + lean * 0.4 + w * 0.14)
     if len(sh) >= 3:
-        pen.hatch(sh, 85, 1.35, W0 * 0.62, coverage=(0.65, 1.0))
+        pen.hatch(sh, 85, 1.52, W0 * 0.60, coverage=(0.65, 1.0))
 
     # Fine vertical organic foliage ticks along the lit left & center
     rows = max(5, int((h - trunk_h) / 3.4))
@@ -191,8 +193,214 @@ def round_tree(pen, x, y, h):
     pen.closed(crown, W0 * 0.85, wobble=0.15)
 
 
+def palm(pen, x, y, h, lean_dir=None):
+    """Gracefully curved ringed palm tree with arched sweeping feather-fronds (oasis/tropical brush)."""
+    rng, W0 = pen.rng, pen.width
+    side = int(rng.choice([-1, 1])) if lean_dir is None else int(lean_dir)
+    bend = side * h * rng.uniform(0.18, 0.34)
+    n = 11
+    ts = np.linspace(0, 1, n)
+    # Smooth curved trunk spine rising from root foot (x, y) to crown hub (cx, cy)
+    xs = x + bend * (ts ** 1.35) + side * h * 0.04 * np.sin(math.pi * ts)
+    ys = y - h * 0.84 * ts
+    # Slender tapered trunk polygon (opaque so foreground palms cleanly mask rear palms!)
+    l_edge, r_edge = [], []
+    for i, t in enumerate(ts):
+        hw = (1.65 - 0.90 * t) * (h / 42.0)
+        l_edge.append((xs[i] - hw, ys[i]))
+        r_edge.append((xs[i] + hw, ys[i]))
+    trunk_poly = l_edge + r_edge[::-1]
+    pen.cv.erase(trunk_poly)
+    # Delicate palm-bark ring ticks along the shadowed east/mid trunk (avoids heavy ladder rungs)
+    for i in range(1, n - 1):
+        lx, ly = l_edge[i]
+        rx, ry = r_edge[i]
+        pen.stroke([(lx + (rx - lx) * 0.32, ly + 0.3), (rx, ry)], W0 * 0.34, taper=(0.3, 0.1), wobble=0.05)
+    pen.stroke(l_edge, W0 * 0.72, taper=(0.05, 0.25), wobble=0.08)
+    pen.stroke(r_edge, W0 * 0.96, taper=(0.05, 0.20), wobble=0.08)
+    pen.stroke([(x - 2.4, y + 0.2), (x + 2.6, y + 0.2)], W0 * 0.48, taper=(0.4, 0.4), wobble=0.08)
+
+    # Crown hub + 7-8 sweeping arched feather fronds radiating outward & drooping gracefully
+    cx, cy = float(xs[-1]), float(ys[-1])
+    frond_r = h * rng.uniform(0.30, 0.38)
+    # Small opaque coconut/crown core
+    core = [(cx + math.cos(a) * 2.1, cy + math.sin(a) * 1.8) for a in np.linspace(0, TAU, 10, endpoint=False)]
+    pen.cv.erase(core)
+    pen.closed(core, W0 * 0.56, wobble=0.1)
+
+    angles = [-2.60, -2.10, -1.58, -1.06, -0.54, -0.05, 0.34]
+    if rng.random() < 0.60:
+        angles.append(-2.98)
+    for ang_base in angles:
+        ang = ang_base + rng.normal(0, 0.13)
+        L = frond_r * rng.uniform(0.84, 1.18)
+        # Frond shoots outward along ang, arching gently downward under gravity
+        p0 = (cx, cy)
+        p1 = (cx + math.cos(ang) * L * 0.52, cy + math.sin(ang) * L * 0.52 - L * 0.20)
+        p2 = (cx + math.cos(ang) * L, cy + math.sin(ang) * L + L * 0.28)
+        spine = chaikin([p0, p1, p2], 2)
+        # Razor-tight narrow frond mask so fronds layer cleanly without thick white halos
+        f_top = [(p[0], p[1] - 0.65) for p in spine]
+        f_bot = [(p[0], p[1] + 1.45) for p in spine[::-1]]
+        pen.cv.erase(f_top + f_bot)
+        east_sh = math.cos(ang) > 0.05
+        pen.stroke(spine, W0 * (0.80 if east_sh else 0.66), taper=(0.05, 0.84), wobble=0.08)
+        # Hanging feather leaflets along the arched rachis
+        for k in range(1, len(spine) - 1):
+            px, py = spine[k]
+            f = k / (len(spine) - 1)
+            ll = L * 0.28 * math.sin(math.pi * f) * rng.uniform(0.82, 1.16)
+            if ll < 1.1:
+                continue
+            dx = math.copysign(ll * 0.30, math.cos(ang))
+            pen.stroke([(px, py), (px + dx, py + ll)], W0 * (0.56 if east_sh else 0.42),
+                       taper=(0.08, 0.88), wobble=0.06)
+
+
+def deadwood(pen, x, y, h):
+    """Twisted gnarly deadwood oak or lightning-struck conifer snag with tapered bark trunk & bare boughs."""
+    rng, W0 = pen.rng, pen.width
+    is_pine = rng.random() < 0.36
+    lean = rng.normal(0, h * 0.09)
+
+    if is_pine:
+        # Skeletal blasted conifer snag: tall tapering trunk with snapped crown & crooked dead stubs
+        n = 7
+        ts = np.linspace(0, 1, n)
+        xs = x + lean * (ts ** 1.1) + rng.normal(0, 0.55, n) * ts
+        ys = y - h * ts
+        l_e = [(xs[i] - (2.0 - 1.55 * t), ys[i]) for i, t in enumerate(ts)]
+        r_e = [(xs[i] + (2.0 - 1.55 * t), ys[i]) for i, t in enumerate(ts)]
+        pen.cv.erase(l_e + r_e[::-1])
+        # Subtle staggered east-side bark ticks
+        for k in range(1, n - 2):
+            bx, by = xs[k] + (0.6 - 0.3 * ts[k]), ys[k]
+            pen.stroke([(bx, by + 1.8), (bx + 0.2, by - 2.0)], W0 * 0.38, taper=(0.3, 0.3))
+        pen.stroke(l_e, W0 * 0.72, taper=(0.05, 0.65), wobble=0.12)
+        pen.stroke(r_e, W0 * 0.96, taper=(0.05, 0.55), wobble=0.12)
+        # Crooked bare dead limbs poking sideways & drooping slightly
+        for f in np.linspace(0.28, 0.88, int(rng.integers(5, 8))):
+            bx = float(np.interp(f, ts, xs))
+            by = float(np.interp(f, ts, ys))
+            for sgn in (-1, 1):
+                if rng.random() < 0.68:
+                    bl = h * (0.28 - 0.16 * f) * rng.uniform(0.7, 1.25)
+                    ang = (0.22 if sgn > 0 else math.pi - 0.22) + rng.normal(0, 0.25)
+                    p1 = (bx + math.cos(ang) * bl * 0.55, by + math.sin(ang) * bl * 0.55)
+                    p2 = (bx + math.cos(ang) * bl, by + math.sin(ang) * bl + rng.uniform(-2, 3))
+                    pen.stroke([(bx, by), p1, p2], W0 * (0.64 if sgn > 0 else 0.52), taper=(0.08, 0.88), wobble=0.12)
+                    if rng.random() < 0.55:
+                        pen.stroke([p1, (p1[0] + sgn * bl * 0.3, p1[1] - rng.uniform(1.5, 4.0))],
+                                   W0 * 0.40, taper=(0.1, 0.9))
+        pen.stroke([(x - 2.8, y + 0.2), (x + 3.0, y + 0.2)], W0 * 0.46, taper=(0.4, 0.4))
+        return
+
+    # Twisted gnarled dead broadleaf oak: stout curved trunk splitting into crooked recursive bare branches!
+    tr_h = h * rng.uniform(0.40, 0.54)
+    mx, my = x + lean * 0.55, y - tr_h
+    mid_x, mid_y = x + lean * 0.25 + rng.normal(0, 1.5), y - tr_h * 0.52
+    trunk_l = [(x - 2.4, y + 0.3), (mid_x - 1.5, mid_y), (mx - 1.1, my)]
+    trunk_r = [(x + 2.4, y + 0.3), (mid_x + 1.5, mid_y), (mx + 1.1, my)]
+    pen.cv.erase(trunk_l + trunk_r[::-1])
+    # Delicate staggered vertical bark shading ticks along the east half of the trunk (avoids harsh zebra stripe!)
+    for f0, f1 in ((0.06, 0.40), (0.34, 0.68), (0.58, 0.92)):
+        ax = x + (mx - x) * f0 + rng.uniform(0.3, 0.9)
+        ay = y - tr_h * f0
+        bx = x + (mx - x) * f1 + rng.uniform(0.2, 0.7)
+        by = y - tr_h * f1
+        pen.stroke([(ax, ay), (bx, by)], W0 * 0.42, taper=(0.30, 0.35), wobble=0.08)
+    pen.stroke(trunk_l, W0 * 0.76, taper=(0.05, 0.35), smooth=1, wobble=0.14)
+    pen.stroke(trunk_r, W0 * 0.96, taper=(0.05, 0.30), smooth=1, wobble=0.14)
+    # Root flare feet
+    pen.stroke([(x - 1.7, y - 2.0), (x - 4.0, y + 0.5)], W0 * 0.58, taper=(0.1, 0.85))
+    pen.stroke([(x + 1.7, y - 2.0), (x + 4.2, y + 0.5)], W0 * 0.74, taper=(0.1, 0.85))
+
+    def _limb(x0, y0, ang, L, w_s, depth):
+        if depth <= 0 or L < 3.0:
+            return
+        a1 = ang + rng.normal(0, 0.22)
+        p1 = (x0 + math.cos(a1) * L * 0.52, y0 + math.sin(a1) * L * 0.52)
+        a2 = a1 + rng.normal(0, 0.28)
+        p2 = (p1[0] + math.cos(a2) * L * 0.48, p1[1] + math.sin(a2) * L * 0.48)
+        pen.stroke([(x0, y0), p1, p2], W0 * w_s, taper=(0.05, 0.72), smooth=1, wobble=0.14)
+        if depth > 1:
+            n_ch = 2 if depth >= 2 else 1
+            for sgn in (-1, 1)[:n_ch]:
+                _limb(p1[0], p1[1], a1 + sgn * rng.uniform(0.35, 0.72), L * rng.uniform(0.55, 0.74), w_s * 0.68, depth - 1)
+            _limb(p2[0], p2[1], a2 + rng.normal(0, 0.38), L * rng.uniform(0.52, 0.72), w_s * 0.66, depth - 1)
+
+    n_main = int(rng.integers(3, 5))
+    for i in range(n_main):
+        f = i / max(1, n_main - 1)
+        ang = -math.pi * (0.82 - 0.64 * f) + rng.normal(0, 0.12)
+        _limb(mx + (f - 0.5) * 1.8, my, ang, h * rng.uniform(0.28, 0.42), 0.78 if f > 0.5 else 0.64, 3)
+
+
 def tree(pen, x, y, h=None, kind=None):
     rng = pen.rng
     kind = kind or str(rng.choice(["spruce", "cypress", "round"], p=[0.4, 0.28, 0.32]))
     h = h or {"spruce": rng.uniform(32, 46), "cypress": rng.uniform(30, 44), "round": rng.uniform(26, 36)}[kind]
     {"spruce": spruce, "cypress": cypress, "round": round_tree}[kind](pen, x, y, h)
+
+
+# --------------------------------------------------------------------------- Wonderdraft Tree Brush pool generators
+
+def _brush_cluster(pen, P, rng, fn, h_range, spread_x, cluster_prob=0.28):
+    """Draw a tightly cropped single tree OR natural 2-3 tree copse sorted back-to-front for Wonderdraft Tree Brush."""
+    cx, by = P.ox, P.oy
+    if rng.random() > cluster_prob:
+        fn(pen, cx, by, rng.uniform(*h_range))
+        return
+    # Tight 2- or 3-tree copse (frontmost tree anchored right at P.oy so Wonderdraft Y-sorting stays exact!)
+    n = int(rng.choice([2, 2, 3]))
+    pts = [(0.0, 0.0, rng.uniform(h_range[0] * 0.95, h_range[1]))]  # frontmost anchor tree at y=by
+    for k in range(1, n):
+        sgn = (-1 if k % 2 else 1) * (1 if rng.random() < 0.5 else -1) if k == 1 else (1 if pts[1][0] < 0 else -1)
+        dx = sgn * rng.uniform(spread_x * 0.65, spread_x * 1.25)
+        dy = -rng.uniform(3.5, 10.0)  # strictly behind the anchor tree!
+        dh = rng.uniform(h_range[0] * 0.78, h_range[1] * 0.96)
+        pts.append((dx, dy, dh))
+    # Draw strictly back-to-front (smaller y first, largest y = frontmost last!)
+    for dx, dy, dh in sorted(pts, key=lambda it: it[1]):
+        fn(pen, cx + dx, by + dy, dh)
+
+
+def pine_brush(pen, P, rng):
+    """Wonderdraft Tree Brush pool: alpine spruce/pine singles & tight copses."""
+    _brush_cluster(pen, P, rng, spruce, (34, 54), spread_x=11.0, cluster_prob=0.30)
+
+
+def broadleaf_brush(pen, P, rng):
+    """Wonderdraft Tree Brush pool: billowy oak/broadleaf woodland singles & copses."""
+    _brush_cluster(pen, P, rng, round_tree, (28, 44), spread_x=12.5, cluster_prob=0.30)
+
+
+def cypress_brush(pen, P, rng):
+    """Wonderdraft Tree Brush pool: slender flame cypress singles & hillside groves."""
+    _brush_cluster(pen, P, rng, cypress, (34, 52), spread_x=7.5, cluster_prob=0.32)
+
+
+def palm_brush(pen, P, rng):
+    """Wonderdraft Tree Brush pool: curved oasis/tropical palms & outward-fanning clusters."""
+    cx, by = P.ox, P.oy
+    if rng.random() > 0.30:
+        palm(pen, cx, by, rng.uniform(36, 52))
+        return
+    # Fan palm cluster trunks outward away from the cluster centre (classic oasis silhouette, never crossing!)
+    n = int(rng.choice([2, 2, 3]))
+    if n == 2:
+        pts = [(-rng.uniform(3.5, 6.5), -rng.uniform(3.0, 7.5), rng.uniform(32, 46), -1),
+               (rng.uniform(3.5, 6.5), 0.0, rng.uniform(38, 52), 1)]
+        if rng.random() < 0.5:
+            pts[0], pts[1] = (pts[0][0], 0.0, pts[1][2], -1), (pts[1][0], -rng.uniform(3.0, 7.5), pts[0][2], 1)
+    else:
+        pts = [(-rng.uniform(5.5, 9.0), -rng.uniform(4.5, 8.5), rng.uniform(32, 44), -1),
+               (rng.uniform(5.5, 9.0), -rng.uniform(3.5, 7.5), rng.uniform(32, 45), 1),
+               (rng.normal(0, 1.5), 0.0, rng.uniform(40, 52), int(rng.choice([-1, 1])))]
+    for dx, dy, dh, ldir in sorted(pts, key=lambda it: it[1]):
+        palm(pen, cx + dx, by + dy, dh, lean_dir=ldir)
+
+
+def deadwood_brush(pen, P, rng):
+    """Wonderdraft Tree Brush pool: twisted dead oaks & blasted conifer snags."""
+    _brush_cluster(pen, P, rng, deadwood, (32, 48), spread_x=11.5, cluster_prob=0.24)

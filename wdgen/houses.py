@@ -10,6 +10,7 @@ import numpy as np
 
 from .flora import tree
 from .ink import chaikin, ellipse_pts
+from .proj import sort_boxes
 from .solids import box, cylinder, pyramid
 
 
@@ -309,32 +310,162 @@ def draw_house(pen, P, X0, Y0, pl):
                    dict(pl, timber=False, dormer=False))
 
 
-def chapel(pen, P, X0, Y0, rng):
-    """Village church / chapel: stone nave with lancet windows, buttressed west bell-tower & cross spire."""
+def _draw_cross(pen, P, x, y, z, h=9.0, w_scale=0.72):
+    """Crisp upright church cross finial projected at world (x, y, z)."""
     W0 = pen.width
-    pl = dict(plan_house(rng, "long"), ridge_x=True, chimney=False, leanto=False, timber=False,
-              cross=False, roof="tile", plinth=True, quoins=True, arch_door=True, lancet=True, dormer=False)
-    pl.update(H=rng.uniform(15, 19), floors=1, win=(2.6, 6.8))
-    s = rng.uniform(5.4, 6.8)
-    ty = Y0 + pl["D"] / 2
-    th = rng.uniform(40, 52)
-    tx0, tx1 = X0 - s * 1.65, X0 + s * 0.35
+    ax, ay = P(x, y, z)
+    pen.stroke([(ax, ay), (ax, ay - h)], W0 * w_scale, taper=(0.0, 0.12), wobble=0)
+    bar_y = ay - h * 0.68
+    bar_hw = h * 0.36
+    pen.stroke([(ax - bar_hw, bar_y), (ax + bar_hw, bar_y)], W0 * (w_scale * 0.88), taper=(0.08, 0.08), wobble=0)
+
+
+def _draw_bell_tower(pen, P, rng, tx0, tx1, ty0, ty1, z0, th, spire_h, crenellated=False):
+    """Gothic stone bell tower with stepped buttresses, rose/clock oculus, twin belfry arches & cross steeple."""
+    W0 = pen.width
     tx = (tx0 + tx1) * 0.5
-    # Stepped corner buttresses + bell tower shaft
-    box(pen, P, tx0 - 1.2, ty - s - 1.2, tx1 + 1.2, ty + s + 1.2, 0, th * 0.28)
-    box(pen, P, tx0, ty - s, tx1, ty + s, 0, th)
-    # Stringcourse molding under belfry + pointed lancet & belfry openings
-    pen.stroke([P(tx0, ty - s, th * 0.66), P(tx1, ty - s, th * 0.66)], W0 * 0.55, taper=(0.05, 0.05))
-    for h in (th * 0.40, th * 0.74):
-        pen.blot([P(tx - 1.2, ty - s, h), P(tx + 1.2, ty - s, h), P(tx + 1.2, ty - s, h + 5.2),
-                  P(tx, ty - s, h + 6.8), P(tx - 1.2, ty - s, h + 5.2)], jitter=0.05)
-    # Tall shingled steeple + small cross finial
-    apex_h = th + rng.uniform(22, 30)
-    pyramid(pen, P, tx0 - 1.0, ty - s - 1.0, tx1 + 1.0, ty + s + 1.0, th, apex_h)
-    ax, ay = P(tx, ty, apex_h)
-    pen.stroke([(ax, ay), (ax, ay - 6.5)], W0 * 0.62, taper=(0.0, 0.15), wobble=0)
-    pen.stroke([(ax - 2.3, ay - 4.4), (ax + 2.3, ay - 4.4)], W0 * 0.55, taper=(0.1, 0.1), wobble=0)
+    ty = (ty0 + ty1) * 0.5
+    tw = tx1 - tx0
+    td = ty1 - ty0
+    # Stepped corner plinth & buttress base (only when grounded at z0 == 0)
+    if z0 <= 0.5:
+        box(pen, P, tx0 - 1.6, ty0 - 1.6, tx1 + 1.6, ty1 + 1.6, 0, th * 0.24)
+        # Compact stepped buttress piers flanking south corners
+        for bx0, bx1 in ((tx0 - 1.2, tx0 + 2.2), (tx1 - 2.2, tx1 + 1.2)):
+            box(pen, P, bx0, ty0 - 1.8, bx1, ty0 + 1.0, 0, th * 0.44)
+    # Main stone tower shaft
+    box(pen, P, tx0, ty0, tx1, ty1, z0, th)
+
+    # Horizontal stone stringcourse cornices along south & east faces
+    for frac in (0.62, 0.96):
+        hz = z0 + (th - z0) * frac
+        pen.stroke([P(tx0, ty0, hz), P(tx1, ty0, hz)], W0 * 0.58, taper=(0.04, 0.04), wobble=0.08)
+        pen.stroke([P(tx1, ty0, hz), P(tx1, ty1, hz)], W0 * 0.52, taper=(0.04, 0.04), wobble=0.08)
+
+    # Circular clock / rose oculus window on the lit south shaft face
+    if th - z0 > 32:
+        oc_z = z0 + (th - z0) * 0.48
+        ox, oy = P(tx, ty0, oc_z)
+        oc_r = min(3.2, tw * 0.22)
+        ring = ellipse_pts(ox, oy, oc_r, oc_r * 1.05, 16)
+        pen.cv.erase(ring)
+        pen.closed(ring, W0 * 0.62, wobble=0.05)
+        pen.stroke([(ox, oy - oc_r * 0.85), (ox, oy + oc_r * 0.85)], W0 * 0.36, taper=(0, 0), wobble=0)
+        pen.stroke([(ox - oc_r * 0.85, oy), (ox + oc_r * 0.85, oy)], W0 * 0.36, taper=(0, 0), wobble=0)
+
+    # Twin pointed gothic belfry louver openings on south face (and east face)
+    bz0 = z0 + (th - z0) * 0.70
+    bh = (th - z0) * 0.20
+    bw = min(2.2, tw * 0.16)
+    for off in (-tw * 0.20, tw * 0.20):
+        bx = tx + off
+        pen.blot([P(bx - bw * 0.5, ty0, bz0), P(bx + bw * 0.5, ty0, bz0),
+                  P(bx + bw * 0.5, ty0, bz0 + bh * 0.72), P(bx, ty0, bz0 + bh * 1.08),
+                  P(bx - bw * 0.5, ty0, bz0 + bh * 0.72)], jitter=0.04)
+    # Single dark arched belfry louver on shadowed east face
+    ebw = min(2.4, td * 0.20)
+    pen.blot([P(tx1, ty - ebw * 0.5, bz0), P(tx1, ty + ebw * 0.5, bz0),
+              P(tx1, ty + ebw * 0.5, bz0 + bh * 0.72), P(tx1, ty, bz0 + bh * 1.08),
+              P(tx1, ty - ebw * 0.5, bz0 + bh * 0.72)], jitter=0.04)
+
+    if crenellated:
+        # English country parish style: crenellated stone parapet + short spirelet & tall cross!
+        box(pen, P, tx0 - 0.8, ty0 - 0.8, tx1 + 0.8, ty1 + 0.8, th, th + 3.2)
+        for cx_p in (tx0 - 0.8, tx1 - 1.8):
+            for cy_p in (ty0 - 0.8, ty1 - 1.8):
+                box(pen, P, cx_p, cy_p, cx_p + 2.6, cy_p + 2.6, th + 3.2, th + 6.4)
+        apex_h = th + 3.2 + spire_h * 0.55
+        pyramid(pen, P, tx0 + 1.4, ty0 + 1.4, tx1 - 1.4, ty1 - 1.4, th + 3.2, apex_h)
+        _draw_cross(pen, P, tx, ty, apex_h, h=9.5, w_scale=0.76)
+    else:
+        # Classic soaring shingled parish steeple + bold cross finial
+        apex_h = th + spire_h
+        pyramid(pen, P, tx0 - 1.3, ty0 - 1.3, tx1 + 1.3, ty1 + 1.3, th, apex_h)
+        _draw_cross(pen, P, tx, ty, apex_h, h=10.0, w_scale=0.78)
+
+
+def plan_chapel(rng):
+    """Plan a medieval village parish church (west-steeple basilica or cruciform transept church)."""
+    W = rng.uniform(50, 62)
+    D = rng.uniform(20, 24)
+    H = rng.uniform(17.5, 21.5)
+    R = (D / 2) * rng.uniform(1.12, 1.34)
+    cruciform = rng.random() < 0.48
+    crossing_tower = cruciform and rng.random() < 0.45
+    s = rng.uniform(7.2, 8.6)
+    tr_proj = D * rng.uniform(0.36, 0.48) if cruciform else 0.0
+    pl = dict(kind="church", W=W, D=D, H=H, R=R, ridge_x=True, floors=1,
+              timber=False, plinth=True, quoins=True, arch_door=True, lancet=True,
+              dormer=False, chimney=False, smoke=False, leanto=False, cross=False,
+              roof="tile", win=(2.8, 7.6),
+              cruciform=cruciform, crossing_tower=crossing_tower,
+              tower_s=s, tr_proj=tr_proj,
+              crenellated=(not crossing_tower) and rng.random() < 0.22)
+    return pl
+
+
+def chapel_footprint(pl, X0, Y0):
+    s = pl["tower_s"]
+    x_min = X0 - (0.0 if pl["crossing_tower"] else s * 1.75) - 3.0
+    y_min = Y0 - pl["tr_proj"] - 4.0
+    x_max = X0 + pl["W"] + 3.0
+    y_max = Y0 + pl["D"] + pl["tr_proj"] + 3.0
+    return (x_min, y_min, x_max, y_max)
+
+
+def chapel(pen, P, X0, Y0, rng, pl=None):
+    """Village parish church: buttressed gothic nave, optional cruciform transepts, tall bell steeple & crosses."""
+    pl = pl or plan_chapel(rng)
+    W, D, H, R = pl["W"], pl["D"], pl["H"], pl["R"]
+    s = pl["tower_s"]
+    ty = Y0 + D * 0.5
+    cruciform = pl["cruciform"]
+    crossing_tower = pl["crossing_tower"]
+
+    tr_w = D * rng.uniform(0.76, 0.88)
+    tr_x0 = X0 + W * 0.30
+    tr_x1 = tr_x0 + tr_w
+    tr_proj = pl["tr_proj"]
+    tr_st = dict(pl, W=tr_w, D=tr_proj + D * 0.5, H=H * 0.96, R=(tr_w / 2) * 1.16,
+                 ridge_x=False, floors=1, win=(2.6, 6.8))
+
+    # 1. Far north transept wing (strictly behind nave)
+    if cruciform:
+        draw_faces(pen, P, house_faces(tr_x0, ty, tr_w, D * 0.5 + tr_proj, tr_st["H"], tr_st["R"], False),
+                   dict(tr_st, floors=0))
+
+    # 2. West bell tower (strictly west/behind the nave in az=28° view)
+    if not crossing_tower:
+        tx0, tx1 = X0 - s * 1.55, X0 + s * 0.45
+        th = rng.uniform(50, 64)
+        spire_h = rng.uniform(28, 40)
+        _draw_bell_tower(pen, P, rng, tx0, tx1, ty - s, ty + s, 0.0, th, spire_h, crenellated=pl["crenellated"])
+
+    # 3. Main gothic stone nave + exterior south wall buttresses + east gable cross
     draw_house(pen, P, X0, Y0, pl)
+    for frac in (0.14, 0.86) if cruciform else (0.16, 0.42, 0.68, 0.90):
+        bx = X0 + W * frac
+        box(pen, P, bx - 1.3, Y0 - 2.1, bx + 1.3, Y0 + 0.4, 0, H * 0.72, inset=0.5)
+    _draw_cross(pen, P, X0 + W, ty, H + R, h=6.2, w_scale=0.58)
+
+    # 4. Near south transept wing (projects forward in front of nave, with arched portal & gable rose/lancet!)
+    if cruciform:
+        draw_faces(pen, P, house_faces(tr_x0, Y0 - tr_proj, tr_w, tr_proj + D * 0.5, tr_st["H"], tr_st["R"], False),
+                   tr_st)
+        # Small stone rose oculus tucked into the south transept gable
+        gx, gy = P(tr_x0 + tr_w * 0.5, Y0 - tr_proj, tr_st["H"] + tr_st["R"] * 0.34)
+        ring = ellipse_pts(gx, gy, 2.5, 2.6, 14)
+        pen.cv.erase(ring)
+        pen.closed(ring, pen.width * 0.55, wobble=0.05)
+
+    # 5. Central crossing steeple rising straight out of the cruciform roof intersection!
+    if crossing_tower:
+        cs = s * 0.82
+        cx = tr_x0 + tr_w * 0.5
+        z_base = H + R * 0.32
+        th = z_base + rng.uniform(26, 36)
+        spire_h = rng.uniform(28, 38)
+        _draw_bell_tower(pen, P, rng, cx - cs, cx + cs, ty - cs, ty + cs, z_base, th, spire_h, crenellated=False)
     return pl
 
 
@@ -373,13 +504,13 @@ def _overlaps(box_, boxes, gap):
 
 
 def _render(pen, P, items):
-    """items: (depth, kind, args). Farther first."""
+    """items: (box, (kind, args)). Exact 3D box topological sort, farther first."""
     rng = pen.rng
-    for _, kind, args in sorted(items, key=lambda it: -it[0]):
+    for kind, args in sort_boxes(P, items):
         if kind == "house":
             draw_house(pen, P, *args)
         elif kind == "chapel":
-            chapel(pen, P, *args, rng)
+            chapel(pen, P, args[0], args[1], rng, args[2])
         elif kind == "tree":
             x, y = P(*args)
             tree(pen, x, y)
@@ -391,135 +522,278 @@ def _render(pen, P, items):
             pen.tuft(*P(*args), rng.uniform(2.8, 4.6))
 
 
-def _house_item(P, pl, X0, Y0):
-    return (P.depth(X0 + pl["W"], Y0), "house", (X0, Y0, pl))
+def _house_item(pl, X0, Y0):
+    return (footprint(pl, X0, Y0), ("house", (X0, Y0, pl)))
 
 
-def _trees_around(rng, P, items, boxes, n, region):
+def _trees_around(rng, items, boxes, n, region):
     (xa, xb), (ya, yb) = region
     for _ in range(n):
         for _ in range(40):
             x, y = rng.uniform(xa, xb), rng.uniform(ya, yb)
-            if not _overlaps((x - 4, y - 4, x + 4, y + 4), boxes, 1):
-                items.append((P.depth(x, y), "tree", (x, y)))
-                boxes.append((x - 4, y - 4, x + 4, y + 4))
+            tbox = (x - 4.5, y - 4.5, x + 4.5, y + 4.5)
+            if not _overlaps(tbox, boxes, 1.5):
+                items.append((tbox, ("tree", (x, y))))
+                boxes.append(tbox)
                 break
 
 
-def _tufts(rng, P, items, boxes):
-    for b in boxes[:]:
+def _tufts(rng, items, host_boxes, all_boxes=None):
+    check = all_boxes if all_boxes is not None else host_boxes
+    for b in host_boxes[:]:
         for _ in range(rng.integers(0, 2)):
-            x = rng.uniform(b[0] + 2, b[2] - 2)
-            y = b[1] - rng.uniform(0.4, 2.2)
-            items.append((P.depth(x, y), "tuft", (x, y)))
+            x = rng.uniform(b[0] + 2, max(b[0] + 2.5, b[2] - 2))
+            y = b[1] - rng.uniform(1.8, 3.6)
+            tbox = (x - 1.5, y - 1.5, x + 1.5, y + 1.5)
+            if not _overlaps(tbox, check, 0.2):
+                items.append((tbox, ("tuft", (x, y))))
 
 
 def single_house(pen, P, rng):
     pl = plan_house(rng)
     X0, Y0 = -pl["W"] / 2, -pl["D"] / 2
-    items = [_house_item(P, pl, X0, Y0)]
-    boxes = [footprint(pl, X0, Y0)]
+    fp = footprint(pl, X0, Y0)
+    items = [_house_item(pl, X0, Y0)]
+    boxes = [fp]
     if rng.random() < 0.45:
-        _trees_around(rng, P, items, boxes, int(rng.integers(1, 3)),
-                      ((X0 - 12, X0 + pl["W"] + 12), (Y0 - 3, Y0 + pl["D"] + 9)))
-    _tufts(rng, P, items, boxes[:1])
+        _trees_around(rng, items, boxes, int(rng.integers(1, 3)),
+                      ((X0 - 12, X0 + pl["W"] + 12), (Y0 - 4, Y0 + pl["D"] + 9)))
+    _tufts(rng, items, [fp], boxes)
     _render(pen, P, items)
 
 
 def hamlet(pen, P, rng):
+    """Compact 3-4 house hamlet in varied shapes: wide (E-W), tall (screen-vertical N-S), or balanced round."""
+    shape = str(rng.choice(["wide", "tall", "round"], p=[0.34, 0.33, 0.33]))
     n = int(rng.integers(3, 5))
     items, boxes = [], []
-    for _ in range(300):
-        if len(boxes) >= n:
+    # Optional central well placed first on ~50% of round hamlets so houses ring naturally around it
+    if shape == "round" and rng.random() < 0.55:
+        wbox = (-6.5, -5.0, 6.5, 5.0)
+        items.append((wbox, ("well", (0.0, 0.0))))
+        boxes.append((-8.0, -7.0, 8.0, 7.0))
+    for _ in range(360):
+        if len(boxes) - (1 if any(it[1][0] == "well" for it in items) else 0) >= n:
             break
         pl = plan_house(rng, str(rng.choice(["cottage", "house", "long", "barn"], p=[0.45, 0.35, 0.1, 0.1])))
-        X0 = rng.normal(0, 22) - pl["W"] / 2
-        Y0 = rng.normal(0, 14) - pl["D"] / 2
+        if shape == "wide":
+            cx = rng.normal(0, 26)
+            cy = rng.normal(0, 11)
+        elif shape == "tall":
+            # Along x = -0.44 * y so the hamlet runs cleanly top-to-bottom on screen (narrow left-to-right!)
+            cy = rng.normal(0, 32)
+            cx = -0.44 * cy + rng.normal(0, 12)
+        else:
+            # Balanced circular/equilibrated yard cluster
+            ang = rng.uniform(0, 2 * math.pi)
+            rad = rng.uniform(20, 42)
+            cx = rad * math.cos(ang) * 0.92 - 0.15 * rad * math.sin(ang)
+            cy = rad * math.sin(ang) * 1.05
+        X0 = cx - pl["W"] / 2
+        Y0 = cy - pl["D"] / 2
         fp = footprint(pl, X0, Y0)
         if not _overlaps(fp, boxes, rng.uniform(2, 5)):
             boxes.append(fp)
-            items.append(_house_item(P, pl, X0, Y0))
+            items.append(_house_item(pl, X0, Y0))
+    bldg_boxes = list(boxes)
     xs = [b[0] for b in boxes] + [b[2] for b in boxes]
     ys = [b[1] for b in boxes] + [b[3] for b in boxes]
     region = ((min(xs) - 10, max(xs) + 10), (min(ys) - 4, max(ys) + 8))
     if rng.random() < 0.65:
-        _trees_around(rng, P, items, boxes, int(rng.integers(1, 3)), region)
-    if rng.random() < 0.35:
+        _trees_around(rng, items, boxes, int(rng.integers(1, 3)), region)
+    if not any(it[1][0] == "well" for it in items) and rng.random() < 0.35:
         for _ in range(30):
             x, y = rng.uniform(*region[0]), rng.uniform(*region[1])
-            if not _overlaps((x - 7, y - 5, x + 7, y + 5), boxes, 1):
-                items.append((P.depth(x, y), "well", (x, y)))
-                boxes.append((x - 7, y - 5, x + 7, y + 5))
+            wbox = (x - 7, y - 5, x + 7, y + 5)
+            if not _overlaps(wbox, boxes, 1):
+                items.append((wbox, ("well", (x, y))))
+                boxes.append(wbox)
                 break
     if rng.random() < 0.35:
-        b = boxes[int(rng.integers(0, len(boxes)))]
+        b = bldg_boxes[int(rng.integers(0, len(bldg_boxes)))]
         A, B = (b[0], b[1] - 5), (b[2], b[1] - 5)
-        if not _overlaps((A[0], A[1] - 1, B[0], A[1] + 1), boxes, 0):
-            items.append((P.depth((A[0] + B[0]) / 2, A[1]), "fence", (A, B)))
-    _tufts(rng, P, items, boxes)
+        fbox = (A[0], A[1] - 1, B[0], A[1] + 1)
+        if not _overlaps(fbox, boxes, 0):
+            items.append((fbox, ("fence", (A, B))))
+            boxes.append(fbox)
+    _tufts(rng, items, bldg_boxes, boxes)
     _render(pen, P, items)
 
 
-def village(pen, P, rng):
+def _draw_road_strip(pen, P, rng, pts_world, half_w=3.2):
+    """Draw a hand-inked double-edged dirt village road along world polyline `pts_world`."""
     W0 = pen.width
-    L = rng.uniform(200, 250)
-    xs = np.linspace(-L / 2, L / 2, 60)
-    ph = rng.uniform(0, 2 * math.pi)
-    road = rng.uniform(8, 18) * np.sin(xs / L * math.pi * rng.uniform(1, 2) + ph)
-    # Gently winding dirt road drawn at ground level
-    for off in (-3.2, 3.2):
-        pts = [P(x, y + off) for x, y in zip(xs, road)]
+    pts_w = np.asarray(pts_world, float)
+    if len(pts_w) < 3:
+        return
+    tang = np.gradient(pts_w, axis=0)
+    nrm = np.stack([-tang[:, 1], tang[:, 0]], axis=1)
+    nrm /= np.maximum(1e-6, np.hypot(nrm[:, 0], nrm[:, 1]))[:, None]
+    for sgn in (-1.0, 1.0):
+        edge = [P(*(p + n * (sgn * half_w))) for p, n in zip(pts_w, nrm)]
         i = 0
-        while i < len(pts) - 3:
-            j = min(len(pts), i + int(rng.integers(10, 22)))
-            pen.stroke(pts[i:j], W0 * 0.48, taper=(0.32, 0.32), wobble=0.35)
+        while i < len(edge) - 3:
+            j = min(len(edge), i + int(rng.integers(10, 22)))
+            pen.stroke(edge[i:j], W0 * 0.48, taper=(0.32, 0.32), wobble=0.35)
             i = j + int(rng.integers(1, 3))
-    road_boxes = [(x - 2, y - 4.5, x + 2, y + 4.5) for x, y in zip(xs, road)]
+
+
+def village(pen, P, rng):
+    """6-12 house village in three distinct shapes: wide E-W road, tall N-S road, or round green/crossroads."""
+    shape = str(rng.choice(["wide", "tall", "round"], p=[0.34, 0.33, 0.33]))
+    road_boxes = []
     items, boxes = [], []
-    if rng.random() < 0.7:  # village chapel landmark
-        for _ in range(60):
-            pl = plan_house(rng, "long")
-            x = rng.uniform(-L * 0.28, L * 0.28)
-            side = 1 if rng.random() < 0.75 else -1
-            X0 = x - pl["W"] / 2
-            seg = (xs >= X0 - 16) & (xs <= X0 + pl["W"] + 2)
-            yr_edge = float(road[seg].max() if side > 0 else road[seg].min()) if seg.any() else float(np.interp(x, xs, road))
-            Y0 = yr_edge + 11.0 if side > 0 else yr_edge - 11.0 - pl["D"]
-            fp = (X0 - 16, Y0 - 3, X0 + pl["W"] + 2, Y0 + pl["D"] + 2)
-            if not _overlaps(fp, boxes + road_boxes, 2):
+    road_pts_list = []
+
+    if shape == "wide":
+        L = rng.uniform(195, 245)
+        xs = np.linspace(-L / 2, L / 2, 60)
+        ph = rng.uniform(0, 2 * math.pi)
+        ys = rng.uniform(8, 18) * np.sin(xs / L * math.pi * rng.uniform(1, 2) + ph)
+        road_pts_list.append(np.stack([xs, ys], axis=1))
+    elif shape == "tall":
+        # Screen-vertical winding village lane (x ≈ -0.44 * y runs cleanly top-to-bottom!)
+        L = rng.uniform(175, 215)
+        ys = np.linspace(-L / 2, L / 2, 56)
+        ph = rng.uniform(0, 2 * math.pi)
+        xs = -0.44 * ys + rng.uniform(7, 15) * np.sin(ys / L * math.pi * rng.uniform(1, 1.8) + ph)
+        road_pts_list.append(np.stack([xs, ys], axis=1))
+    else:
+        # Round / equilibrated village: either a crossroads (+) or a circular village green!
+        round_mode = "green" if rng.random() < 0.5 else "cross"
+        if round_mode == "cross":
+            L1 = rng.uniform(140, 175)
+            xs1 = np.linspace(-L1 / 2, L1 / 2, 42)
+            ys1 = rng.uniform(4, 10) * np.sin(xs1 / L1 * math.pi + rng.uniform(0, 2 * math.pi))
+            L2 = rng.uniform(135, 165)
+            ys2 = np.linspace(-L2 / 2, L2 / 2, 42)
+            xs2 = -0.44 * ys2 + rng.uniform(4, 10) * np.sin(ys2 / L2 * math.pi + rng.uniform(0, 2 * math.pi))
+            road_pts_list.append(np.stack([xs1, ys1], axis=1))
+            road_pts_list.append(np.stack([xs2, ys2], axis=1))
+        else:
+            rx_g, ry_g = rng.uniform(32, 42), rng.uniform(36, 46)
+            ts_g = np.linspace(0, 2 * math.pi, 48)
+            gx_r = rx_g * np.cos(ts_g) - 0.18 * ry_g * np.sin(ts_g)
+            gy_r = ry_g * np.sin(ts_g)
+            road_pts_list.append(np.stack([gx_r, gy_r], axis=1))
+            # Two short entry lanes leaving the village green
+            road_pts_list.append(np.stack([np.linspace(rx_g, rx_g + 42, 14), np.zeros(14)], axis=1))
+            road_pts_list.append(np.stack([np.linspace(-rx_g - 38, -rx_g, 14), np.zeros(14)], axis=1))
+
+    for rpts in road_pts_list:
+        _draw_road_strip(pen, P, rng, rpts)
+        for x, y in rpts:
+            road_boxes.append((x - 2.5, y - 4.5, x + 2.5, y + 4.5))
+
+    # Optional village parish church landmark (~64% of villages)
+    if rng.random() < 0.64:
+        for _ in range(80):
+            pl = plan_chapel(rng)
+            if shape == "wide":
+                rpts = road_pts_list[0]
+                x = rng.uniform(-90, 80)
+                side = 1 if rng.random() < 0.88 else -1
+                X0 = x - pl["W"] / 2
+                fp_try = chapel_footprint(pl, X0, 0.0)
+                seg = (rpts[:, 0] >= fp_try[0]) & (rpts[:, 0] <= fp_try[2])
+                yr_edge = float(rpts[seg, 1].max() if side > 0 else rpts[seg, 1].min()) if seg.any() else 0.0
+                Y0 = yr_edge + 14.0 + pl["tr_proj"] if side > 0 else yr_edge - 14.0 - pl["D"] - pl["tr_proj"]
+            elif shape == "tall":
+                rpts = road_pts_list[0]
+                yc = rng.uniform(-25, 55)
+                xc_road = float(np.interp(yc, rpts[:, 1], rpts[:, 0]))
+                side = int(rng.choice([-1, 1]))
+                Y0 = yc - pl["D"] / 2
+                X0 = xc_road + 14.0 + (0.0 if pl["crossing_tower"] else pl["tower_s"] * 1.75) if side > 0 else xc_road - 14.0 - pl["W"]
+            else:
+                # Overlooking the north/upper edge of the village green or north-west crossroads quadrant
+                X0 = rng.uniform(-38, 12) - pl["W"] * 0.4
+                Y0 = rng.uniform(22, 56)
+            fp = chapel_footprint(pl, X0, Y0)
+            if not _overlaps(fp, boxes + road_boxes, 2.5):
                 boxes.append(fp)
-                items.append((P.depth(X0 + pl["W"], Y0), "chapel", (X0, Y0)))
+                items.append((fp, ("chapel", (X0, Y0, pl))))
                 break
+
+    # Center well on round village greens (so the green feels alive!)
+    if shape == "round" and len(road_pts_list) == 3:
+        wbox = (-6.5, -5.0, 6.5, 5.0)
+        if not _overlaps((-8, -6, 8, 6), boxes + road_boxes, 1):
+            items.append((wbox, ("well", (0.0, 0.0))))
+            boxes.append((-8, -6, 8, 6))
+
     target = int(rng.integers(7, 13))
-    for _ in range(600):
+    for _ in range(750):
         if len(items) >= target:
             break
         pl = plan_house(rng)
-        x = rng.uniform(-L / 2 + 10, L / 2 - 10)
-        yr = float(np.interp(x, xs, road))
-        side = rng.choice([-1, 1])
-        setback = rng.uniform(5, 12) + (rng.uniform(0, 28) if rng.random() < 0.3 else 0)
-        X0 = x - pl["W"] / 2
-        Y0 = yr + setback if side > 0 else yr - setback - pl["D"]
+        if shape == "wide":
+            rpts = road_pts_list[0]
+            x = rng.uniform(rpts[0, 0] + 10, rpts[-1, 0] - 10)
+            yr = float(np.interp(x, rpts[:, 0], rpts[:, 1]))
+            side = rng.choice([-1, 1])
+            setback = rng.uniform(5, 12) + (rng.uniform(0, 26) if rng.random() < 0.3 else 0)
+            X0 = x - pl["W"] / 2
+            Y0 = yr + setback if side > 0 else yr - setback - pl["D"]
+        elif shape == "tall":
+            rpts = road_pts_list[0]
+            y = rng.uniform(rpts[0, 1] + 10, rpts[-1, 1] - 10)
+            xr = float(np.interp(y, rpts[:, 1], rpts[:, 0]))
+            side = rng.choice([-1, 1])
+            setback = rng.uniform(6, 13) + (rng.uniform(0, 22) if rng.random() < 0.28 else 0)
+            X0 = xr + setback if side > 0 else xr - setback - pl["W"]
+            Y0 = y - pl["D"] / 2
+        else:
+            # Ring around the central plaza / crossroads evenly in all directions
+            ang = rng.uniform(0, 2 * math.pi)
+            rad = rng.uniform(34, 86)
+            cx = rad * math.cos(ang) * 0.94 - 0.22 * rad * math.sin(ang)
+            cy = rad * math.sin(ang) * 1.02
+            X0 = cx - pl["W"] / 2
+            Y0 = cy - pl["D"] / 2
         fp = footprint(pl, X0, Y0)
         if not _overlaps(fp, boxes + road_boxes, rng.uniform(2.5, 6)):
             boxes.append(fp)
-            items.append(_house_item(P, pl, X0, Y0))
-    if rng.random() < 0.65:
+            items.append(_house_item(pl, X0, Y0))
+
+    bldg_boxes = list(boxes)
+    if not any(it[1][0] == "well" for it in items) and rng.random() < 0.65:
         for _ in range(40):
-            x = rng.uniform(-L * 0.35, L * 0.35)
-            y = float(np.interp(x, xs, road)) + rng.choice([-1, 1]) * 9
-            if not _overlaps((x - 7, y - 5, x + 7, y + 5), boxes + road_boxes, 1):
-                items.append((P.depth(x, y), "well", (x, y)))
-                boxes.append((x - 7, y - 5, x + 7, y + 5))
+            rpts = road_pts_list[0]
+            idx = int(rng.integers(len(rpts) // 4, max(len(rpts) // 4 + 1, 3 * len(rpts) // 4)))
+            x = float(rpts[idx, 0]) + rng.choice([-1, 1]) * 10
+            y = float(rpts[idx, 1]) + rng.choice([-1, 1]) * 10
+            wbox = (x - 7, y - 5, x + 7, y + 5)
+            if not _overlaps(wbox, boxes + road_boxes, 1):
+                items.append((wbox, ("well", (x, y))))
+                boxes.append(wbox)
                 break
     for _ in range(int(rng.integers(1, 4))):  # garden fences
-        b = boxes[int(rng.integers(0, len(boxes)))]
+        b = bldg_boxes[int(rng.integers(0, len(bldg_boxes)))]
         A, B = (b[0], b[1] - 6), (b[2], b[1] - 6)
-        if not _overlaps((A[0], A[1] - 1, B[0], A[1] + 1), boxes + road_boxes, 0):
-            items.append((P.depth((A[0] + B[0]) / 2, A[1]), "fence", (A, B)))
-    by = [b[1] for b in boxes] + [b[3] for b in boxes]
-    _trees_around(rng, P, items, boxes + road_boxes, int(rng.integers(3, 7)),
-                  ((-L / 2, L / 2), (min(by) - 6, max(by) + 10)))
-    _tufts(rng, P, items, boxes)
+        fbox = (A[0], A[1] - 1, B[0], A[1] + 1)
+        if not _overlaps(fbox, boxes + road_boxes, 0):
+            items.append((fbox, ("fence", (A, B))))
+            boxes.append(fbox)
+    bx_all = [b[0] for b in boxes] + [b[2] for b in boxes]
+    by_all = [b[1] for b in boxes] + [b[3] for b in boxes]
+    occ_boxes = list(boxes) + list(road_boxes)
+    if shape == "tall":
+        # Keep trees hugging the screen-vertical lane instead of drifting into empty diagonal corners
+        rpts = road_pts_list[0]
+        for _ in range(int(rng.integers(3, 7))):
+            for _ in range(40):
+                y = rng.uniform(min(by_all) - 6, max(by_all) + 10)
+                xr = float(np.interp(y, rpts[:, 1], rpts[:, 0]))
+                x = xr + rng.uniform(-52, 52)
+                tbox = (x - 4.5, y - 4.5, x + 4.5, y + 4.5)
+                if not _overlaps(tbox, occ_boxes, 1.5):
+                    items.append((tbox, ("tree", (x, y))))
+                    occ_boxes.append(tbox)
+                    boxes.append(tbox)
+                    break
+    else:
+        _trees_around(rng, items, occ_boxes, int(rng.integers(3, 7)),
+                      ((min(bx_all) - 10, max(bx_all) + 10), (min(by_all) - 6, max(by_all) + 10)))
+    _tufts(rng, items, bldg_boxes, occ_boxes)
     _render(pen, P, items)

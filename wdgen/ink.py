@@ -97,6 +97,79 @@ class Canvas:
             self._d.polygon(sp, fill=0)
             self._p.polygon(sp, fill=255)
 
+    def erase_soft(self, pts, y_full, y_zero):
+        """Erase ink behind `pts` and fill paper opaque above y_full, feathering smoothly to 0 at y_zero."""
+        if len(pts) < 3:
+            return
+        sp = self._scale(pts)
+        W, H = self.paper.size
+        tmp = Image.new("L", (W, H), 0)
+        td = ImageDraw.Draw(tmp)
+        td.polygon(sp, fill=255)
+        yf, yz = y_full * self.k, y_zero * self.k
+        row0 = max(0, int(math.floor(yf)))
+        row1 = min(H, int(math.ceil(yz)))
+        if row1 > row0:
+            strip = np.asarray(tmp.crop((0, row0, W, row1)), np.float32)
+            ys = np.arange(row0, row1, dtype=np.float32)[:, None]
+            ramp = np.clip((yz - ys) / max(1e-3, yz - yf), 0.0, 1.0)
+            tmp.paste(Image.fromarray(np.round(strip * ramp).astype(np.uint8), "L"), (0, row0))
+        if row1 < H:
+            td.rectangle((0, row1, W, H), fill=0)
+        self.paper = ImageChops.lighter(self.paper, tmp)
+        self.mask = ImageChops.multiply(self.mask, ImageChops.invert(tmp))
+        self._d = ImageDraw.Draw(self.mask)
+        self._p = ImageDraw.Draw(self.paper)
+
+    def erase_soft_apron(self, poly, apron_pts, feather=7.0):
+        """Erase ink behind `poly` and fill paper opaque, feathering smoothly to 0 along the curved `apron_pts` base.
+
+        Uses the true lower envelope (max y per x column) of `apron_pts` so folded or steep 3D projections
+        never create vertical clipping spikes.
+        """
+        if len(poly) < 3 or len(apron_pts) < 2:
+            return
+        sp = self._scale(poly)
+        W, H = self.paper.size
+        tmp = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(tmp).polygon(sp, fill=255)
+        ap = np.asarray(apron_pts, float) * self.k
+        f_px = max(1.0, feather * self.k)
+        x0 = max(0, int(math.floor(ap[:, 0].min())) - 2)
+        x1 = min(W, int(math.ceil(ap[:, 0].max())) + 2)
+        y0 = max(0, int(math.floor(ap[:, 1].min() - f_px)) - 1)
+        y1 = min(H, int(math.ceil(ap[:, 1].max())) + 2)
+        if x1 > x0 and y1 > y0:
+            xs = np.arange(x0, x1, dtype=np.float32)
+            yb = np.full(len(xs), -1e9, dtype=np.float32)
+            for i in range(len(ap) - 1):
+                ax, ay = float(ap[i, 0]), float(ap[i, 1])
+                bx, by = float(ap[i + 1, 0]), float(ap[i + 1, 1])
+                if abs(bx - ax) < 1e-4:
+                    ix = int(round(ax)) - x0
+                    if 0 <= ix < len(xs):
+                        yb[ix] = max(yb[ix], ay, by)
+                    continue
+                if ax > bx:
+                    ax, ay, bx, by = bx, by, ax, ay
+                i0 = max(0, int(math.floor(ax)) - x0)
+                i1 = min(len(xs) - 1, int(math.ceil(bx)) - x0)
+                if i1 >= i0:
+                    t = np.clip((xs[i0:i1 + 1] - ax) / (bx - ax), 0.0, 1.0)
+                    yb[i0:i1 + 1] = np.maximum(yb[i0:i1 + 1], ay + (by - ay) * t)
+            valid = yb > -1e8
+            if valid.any():
+                if not valid.all():
+                    yb = np.interp(xs, xs[valid], yb[valid]).astype(np.float32)
+                ys = np.arange(y0, y1, dtype=np.float32)[:, None]
+                ramp = np.clip((yb[None, :] - ys) / f_px, 0.0, 1.0)
+                strip = np.asarray(tmp.crop((x0, y0, x1, y1)), np.float32)
+                tmp.paste(Image.fromarray(np.round(strip * ramp).astype(np.uint8), "L"), (x0, y0))
+        self.paper = ImageChops.lighter(self.paper, tmp)
+        self.mask = ImageChops.multiply(self.mask, ImageChops.invert(tmp))
+        self._d = ImageDraw.Draw(self.mask)
+        self._p = ImageDraw.Draw(self.paper)
+
     def wash(self, pts, value=255):
         """Add soft colour shading (max-blended, so overlapping bands don't fight)."""
         if len(pts) < 3:
@@ -281,56 +354,89 @@ class Pen:
             self.stroke(pts, self.width * 0.7, taper=(0.05, 0.75), smooth=2, wobble=0.1)
 
     def bush(self, x, y, rx, ry=None, outline=True):
-        """Hand-inked leafy foliage clump with scalloped lobes and right-side shadow, base at (x, y)."""
+        """Hand-inked multi-clump leafy shrub with billowy foliage puffs & grounded tufts, base at (x, y)."""
         rng, W0 = self.rng, self.width
-        ry = ry or rx * 0.72
-        cy = y - ry * 0.85
-        # Scalloped multi-lobe silhouette (flat-grounded at bottom, billowy lobes on top)
-        n_lobes = max(5, int(rx / 1.8) + 2)
-        ts = np.linspace(0, TAU, n_lobes * 6, endpoint=False)
+        ry = ry or rx * 0.62
+        # Build 3 overlapping organic foliage sub-puffs (center crown + left & right shoulders)
+        puffs = [
+            (x - rx * rng.uniform(0.36, 0.48), y - ry * rng.uniform(0.46, 0.60), rx * rng.uniform(0.48, 0.58), ry * rng.uniform(0.56, 0.68)),
+            (x + rx * rng.uniform(0.34, 0.48), y - ry * rng.uniform(0.42, 0.56), rx * rng.uniform(0.50, 0.60), ry * rng.uniform(0.54, 0.66)),
+            (x + rng.normal(0, rx * 0.08), y - ry * rng.uniform(0.72, 0.88), rx * rng.uniform(0.56, 0.68), ry * rng.uniform(0.62, 0.76)),
+        ]
+        # Compute outer ruffled multi-puff silhouette around the bush center
+        cy_ref = y - ry * 0.55
+        n_pts = 48
+        ts = np.linspace(0, TAU, n_pts, endpoint=False)
         ph = rng.uniform(0, TAU)
-        scallop = 1.0 + 0.13 * np.abs(np.sin(0.5 * n_lobes * ts + ph)) + 0.05 * np.sin(3 * ts + ph)
-        xs = x + rx * scallop * np.cos(ts)
-        ys = cy + ry * scallop * np.sin(ts)
-        ys = np.minimum(ys, y + ry * 0.12)
-        blob = np.stack([xs, ys], 1)
+        pts = []
+        for idx, t in enumerate(ts):
+            dx, dy = math.cos(t), math.sin(t)
+            # Ray-ellipse farthest intersection across all foliage sub-puffs
+            best_s = 0.0
+            for px, py, prx, pry in puffs:
+                ox, oy = x - px, cy_ref - py
+                A = (dx / prx) ** 2 + (dy / pry) ** 2
+                B = 2.0 * (ox * dx / (prx * prx) + oy * dy / (pry * pry))
+                C = (ox / prx) ** 2 + (oy / pry) ** 2 - 1.0
+                disc = B * B - 4.0 * A * C
+                if disc >= 0.0:
+                    s = (-B + math.sqrt(disc)) / (2.0 * A)
+                    if s > best_s:
+                        best_s = s
+            ruffle = 1.0 + 0.09 * math.sin(9.0 * t + ph) + 0.05 * math.cos(15.0 * t - ph)
+            bx = x + dx * best_s * ruffle
+            by = min(y + ry * 0.08, cy_ref + dy * best_s * ruffle)
+            pts.append((bx, by))
+        blob = np.asarray(pts, float)
         self.cv.erase(blob)
 
-        # Leafy dabs: dense & darker along bottom/east shadow, airy on lit upper-left
-        rows = max(2, int(ry * 2.1 / 2.6))
-        for i in range(rows):
-            v = (i + 0.5) / rows  # 0 top .. 1 bottom
-            yy = cy - ry * 0.92 + v * ry * 1.85
-            half = rx * math.sqrt(max(0.0, 1 - (2 * v - 1) ** 2)) * 0.92
-            n = max(1, int(half * 2 / 3.4) + (1 if v > 0.55 else 0))
-            for j in range(n):
-                u = (j + rng.uniform(0.2, 0.8)) / n  # 0 left .. 1 right
-                xx = x - half + u * 2 * half
-                shadow = (u > 0.48) or (v > 0.62)
-                if not shadow and rng.random() < 0.48:
-                    continue  # leave sunlit breathing space on upper-left
-                size = rng.uniform(1.3, 2.2) * (1.1 if shadow else 0.85)
-                self.dab(xx, yy + rng.normal(0, 0.45), size, angle=rng.normal(0.15 if u > 0.5 else -0.1, 0.25),
-                         w=W0 * (0.95 if (u > 0.55 and v > 0.45) else 0.72 if shadow else 0.55))
+        # Layered crescent leaf dabs inside each puff (airy sunlit upper-left, rich shadowed lower-right)
+        for p_idx, (px, py, prx, pry) in enumerate(puffs):
+            is_east = (p_idx == 1)
+            n_dabs = max(3, int(prx * pry / 4.2))
+            for _ in range(n_dabs):
+                ang = rng.uniform(0, TAU)
+                rr = math.sqrt(rng.uniform(0.05, 0.85))
+                lx = px + math.cos(ang) * prx * rr
+                ly = min(y - 0.5, py + math.sin(ang) * pry * rr)
+                u = (lx - (x - rx)) / max(2.0 * rx, 1e-6)
+                v = (ly - (y - ry * 1.5)) / max(ry * 1.5, 1e-6)
+                shadow = is_east or (u > 0.52) or (v > 0.62)
+                if not shadow and rng.random() < 0.55:
+                    continue
+                size = rng.uniform(1.15, 1.95) * (1.08 if shadow else 0.82)
+                self.dab(lx, ly, size, angle=rng.normal(0.22 if u > 0.5 else -0.15, 0.35),
+                         w=W0 * (0.86 if (u > 0.58 and v > 0.50) else 0.66 if shadow else 0.48))
+
+        # Subtle internal lobe-separation leaf arcs so crown reads as clustered foliage, not a rock
+        for px, py, prx, pry in puffs[:2]:
+            arc_t = np.linspace(math.pi * 1.15, math.pi * 1.85, 6)
+            arc = [(px + prx * 0.72 * math.cos(tt), min(y - 0.5, py + pry * 0.65 * math.sin(tt))) for tt in arc_t]
+            if rng.random() < 0.75:
+                self.stroke(arc, W0 * 0.50, taper=(0.35, 0.35), wobble=0.18)
 
         if outline:
-            # Crisp scalloped leafy rim (broken slightly on sunlit upper-left for hand-inked charm)
+            # Delicate broken leafy silhouette (light & airy on sunlit upper-left, crisper on shaded lower-right)
             ring = np.vstack([blob, blob[:1]])
             k = len(blob)
             i = 0
             while i < k:
-                # bottom & east rim stay mostly continuous; upper-left can breathe gently
                 t_mid = ts[i % k]
-                is_lit = math.sin(t_mid) < -0.25 and math.cos(t_mid) < -0.1
-                span = int(rng.integers(k // 5, k // 2))
+                is_lit = math.sin(t_mid) < -0.15 and math.cos(t_mid) < 0.15
+                span = int(rng.integers(k // 9, k // 4))
                 j = min(k, i + span)
-                if not (is_lit and rng.random() < 0.28):
-                    self.stroke(ring[i:j + 1], W0 * (0.88 if not is_lit else 0.72),
-                                taper=(0.2, 0.2), wobble=0.25)
-                i = j + (int(rng.integers(1, 3)) if is_lit else 0)
-        # Subtle grounded base shadow stroke
-        self.stroke([(x - rx * 0.72, y + 0.3), (x + rx * 0.82, y + 0.3)], W0 * 0.85,
-                    taper=(0.25, 0.2), wobble=0.2)
+                if not (is_lit and rng.random() < 0.36):
+                    self.stroke(ring[i:j + 1], W0 * (0.72 if not is_lit else 0.54),
+                                taper=(0.30, 0.30), wobble=0.28)
+                i = j + (int(rng.integers(1, 3)) if is_lit else int(rng.integers(0, 2)))
+        # Grounding grass blades hugging the base instead of a heavy flat stone bar
+        for gx_f in (-0.65, 0.05, 0.62):
+            if rng.random() < 0.78:
+                gx = x + rx * gx_f + rng.normal(0, 0.8)
+                h_g = rng.uniform(2.2, 3.6)
+                lean = gx_f * 1.4 + rng.normal(0, 0.6)
+                self.stroke([(gx, y + 0.5), (gx + lean * 0.5, y - h_g * 0.5), (gx + lean, y - h_g)],
+                            W0 * 0.58, taper=(0.05, 0.75), smooth=1, wobble=0.08)
 
     def stone(self, x, y, r, w=None):
         rng = self.rng

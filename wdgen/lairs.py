@@ -311,7 +311,7 @@ def crack(pen, x, y, ang, L, w=None, branch=True, inside=None):
         crack(pen, bx, by, ang + rng.choice([-1, 1]) * rng.uniform(0.5, 1.0), L * 0.45, w, False, inside)
 
 
-# --------------------------------------------------------------------------- 3D (az=28°, el=34°) caves, burrows & warrens
+# --------------------------------------------------------------------------- 3D (az=28°, el=34°) caves & burrows
 
 _SUN_3D = np.array([-0.82, 0.24, 0.52])
 _SUN_3D /= float(np.linalg.norm(_SUN_3D))
@@ -902,12 +902,13 @@ def hill_cave(pen, P, rng):
     props = [(P.depth(mx, my), "cave", (mx, my))]
     for _ in range(rng.integers(2, 5)):
         t = rng.uniform(0, TAU)
-        rr = rng.uniform(0.28, 0.86)
+        rr = rng.uniform(0.32, 0.86)
         wx, wy = rx * rr * math.cos(t), ry * rr * math.sin(t)
         wz = h_fn(wx, wy)
         if math.hypot(wx - mx, wy - my) < mw * 1.15 or not vis_fn(wx, wy, wz):
             continue
-        kind = "tree" if rng.random() < 0.65 else "bush"
+        # Keep shrubs off the sharp summit apex so they never read as floating summit pebbles
+        kind = "tree" if (rng.random() < 0.65 or wz > H * 0.68 or rr < 0.44) else "bush"
         props.append((P.depth(wx, wy), kind, (wx, wy, wz)))
 
     for sgn in (-1, 1):
@@ -928,10 +929,10 @@ def hill_cave(pen, P, rng):
         else:
             boulder(pen, *P(args[0], args[1], 0.0), rng.uniform(4.8, 8.2))
 
-    # Ground grass tufts around the tilted 3/4 foothills
+    # Ground grass tufts around the visible front foothills only
     for _ in range(rng.integers(4, 8)):
-        t = rng.uniform(P.az + math.pi * 0.9, P.az + math.pi * 2.1)
-        wx, wy = rx * rng.uniform(0.95, 1.22) * math.cos(t), ry * rng.uniform(0.95, 1.22) * math.sin(t)
+        t = rng.uniform(P.az + math.pi + 0.25, P.az + TAU - 0.25)
+        wx, wy = rx * rng.uniform(0.98, 1.24) * math.cos(t), ry * rng.uniform(0.98, 1.24) * math.sin(t)
         pen.tuft(*P(wx, wy, 0.0), rng.uniform(3.2, 5.2))
 
 
@@ -1054,13 +1055,21 @@ def cliff_cave(pen, P, rng):
                     timber=(rng.random() < 0.22), stone_lintel=(rng.random() < 0.25),
                     roots=(rng.random() < 0.30), trail=True)
 
-    # Organic weathered talus boulders flanking the cliff foot
-    for sgn in (-1, 1):
-        if facing == "south":
-            bx, by = mx + sgn * (mw * 0.72 + rng.uniform(6, 16)), my - rng.uniform(4, 10)
-        else:
-            bx, by = mx + rng.uniform(4, 10), my + sgn * (mw * 0.72 + rng.uniform(6, 16))
-        boulder(pen, *P(bx, by, 0.0), rng.uniform(5.0, 8.5))
+    # Organic weathered talus boulders strictly on the visible front/south flanks of the cliff foot
+    talus = []
+    if facing == "south":
+        for sgn in (-1, 1):
+            bx = mx + sgn * (mw * 0.72 + rng.uniform(6, 16))
+            by = my - rng.uniform(6, 12)
+            talus.append((P.depth(bx, by), bx, by))
+    else:
+        # East-facing cliff: keep boulders south/front of the portal (never floating behind north shoulder!)
+        talus.append((P.depth(mx + 8, my - mw * 0.75 - 8), mx + rng.uniform(4, 10), my - (mw * 0.72 + rng.uniform(6, 14))))
+        if rng.random() < 0.75:
+            bx, by = mx + rng.uniform(12, 20), my - rng.uniform(4, 14)
+            talus.append((P.depth(bx, by), bx, by))
+    for _, bx, by in sorted(talus, key=lambda it: -it[0]):
+        boulder(pen, *P(bx, by, 0.0), rng.uniform(5.0, 8.2))
 
 
 # --------------------------------------------------------------------------- 3. Boulder Caves (3D 3/4 Megalithic Dolmen)
@@ -1117,14 +1126,24 @@ def boulder_cave(pen, P, rng):
         off_t = u * rng.choice([-1, 1]) * rng.uniform(6, 14)
         pen.tuft(*P(top_c[0] + off_t[0], top_c[1] + off_t[1], top_c[2]), rng.uniform(3.2, 5.0))
 
-    # 4. Foreground organic scree boulders, scalloped bushes & tufts in 3D `(x, y)`
+    # 4. Foreground organic scree boulders, leafy shrubs & tufts strictly in front of the monoliths!
     fg = []
-    for sgn in (-1, 1):
-        p_f = u * (sgn * (gap * 0.72 + rng.uniform(14, 24))) - v_in * rng.uniform(10, 18)
-        fg.append((P.depth(p_f[0], p_f[1]), "bush" if rng.random() < 0.55 else "rock", p_f))
-    for _ in range(rng.integers(4, 7)):
-        p_t = u * rng.uniform(-58, 58) - v_in * rng.uniform(12, 30)
-        fg.append((P.depth(p_t[0], p_t[1]), "tuft", p_t))
+    if facing == "south":
+        for sgn in (-1, 1):
+            p_f = u * (sgn * (gap * 0.72 + rng.uniform(14, 24))) - v_in * rng.uniform(20, 28)
+            fg.append((P.depth(p_f[0], p_f[1]), "bush" if rng.random() < 0.55 else "rock", p_f))
+        for _ in range(rng.integers(4, 7)):
+            p_t = u * rng.uniform(-56, 56) - v_in * rng.uniform(18, 32)
+            fg.append((P.depth(p_t[0], p_t[1]), "tuft", p_t))
+    else:
+        # East-facing grotto: keep foreground props strictly on the visible SOUTH / SE flanks (NEVER behind north monolith!)
+        p_s = np.array([rng.uniform(12, 24), -(gap * 0.72 + rng.uniform(18, 28))])
+        fg.append((P.depth(p_s[0], p_s[1]), "bush" if rng.random() < 0.55 else "rock", p_s))
+        p_e = np.array([rng.uniform(24, 34), rng.uniform(-gap * 0.55, gap * 0.10)])
+        fg.append((P.depth(p_e[0], p_e[1]), "rock" if rng.random() < 0.65 else "bush", p_e))
+        for _ in range(rng.integers(4, 7)):
+            p_t = np.array([rng.uniform(18, 36), rng.uniform(-50, 24)])
+            fg.append((P.depth(p_t[0], p_t[1]), "tuft", p_t))
     for _, kind, pos in sorted(fg, key=lambda it: -it[0]):
         if kind == "bush":
             pen.bush(*P(pos[0], pos[1], 0.0), rng.uniform(5.2, 8.2), outline=True)
@@ -1202,14 +1221,17 @@ def low_entrance(pen, P, rng):
                       z_fn=lambda x, y: -dz * max(0.0, min(1.0, (y - (y_m - tL)) / tL)))
         # Right (east) surface rim lip curving out along x = x1
         pen.stroke([P(x1, y_m, 0.0), P(x1, y_m - tL, 0.0)], W0 * 1.02, taper=(0.06, 0.78), wobble=0.18)
-        # Mossy stones & tufts hugging the sunken rims
+        # Mossy stones & tufts cleanly outside the sunken rims (never clipping into trench walls)
+        rim_props = []
         for sgn in (-1, 1):
-            for f in (0.28, 0.72):
-                sx, sy = (x0 if sgn < 0 else x1) + sgn * rng.uniform(3.5, 7.5), y_m - tL * f
-                if rng.random() < 0.55:
-                    boulder(pen, *P(sx, sy, 0.0), rng.uniform(3.8, 6.2))
-                else:
-                    pen.tuft(*P(sx, sy, 0.0), rng.uniform(3.2, 5.0))
+            for f in (0.34, 0.76):
+                sx, sy = (x0 if sgn < 0 else x1) + sgn * rng.uniform(6.0, 10.5), y_m - tL * f
+                rim_props.append((P.depth(sx, sy), "boulder" if rng.random() < 0.52 else "tuft", (sx, sy)))
+        for _, rk, (sx, sy) in sorted(rim_props, key=lambda it: -it[0]):
+            if rk == "boulder":
+                boulder(pen, *P(sx, sy, 0.0), rng.uniform(3.6, 5.8))
+            else:
+                pen.tuft(*P(sx, sy, 0.0), rng.uniform(3.2, 5.0))
         if has_steps:
             _trail_3d(pen, P, rng, 0.0, y_m - tL - 1.0, (0.0, -1.0), tw * 0.58, rng.uniform(14, 22))
     else:
@@ -1239,13 +1261,16 @@ def low_entrance(pen, P, rng):
             _trail_3d(pen, P, rng, x_m + 4.0, 0.0, (1.0, 0.0), tw * 0.55, tL * 1.15,
                       z_fn=lambda x, y: -dz * max(0.0, min(1.0, ((x_m + tL) - x) / tL)))
         pen.stroke([P(x_m, y0, 0.0), P(x_m + tL, y0, 0.0)], W0 * 1.04, taper=(0.06, 0.78), wobble=0.18)
+        rim_props = []
         for sgn in (-1, 1):
-            for f in (0.28, 0.72):
-                sx, sy = x_m + tL * f, (y0 if sgn < 0 else y1) + sgn * rng.uniform(3.5, 7.5)
-                if rng.random() < 0.55:
-                    boulder(pen, *P(sx, sy, 0.0), rng.uniform(3.8, 6.2))
-                else:
-                    pen.tuft(*P(sx, sy, 0.0), rng.uniform(3.2, 5.0))
+            for f in (0.34, 0.76):
+                sx, sy = x_m + tL * f, (y0 if sgn < 0 else y1) + sgn * rng.uniform(6.0, 10.5)
+                rim_props.append((P.depth(sx, sy), "boulder" if rng.random() < 0.52 else "tuft", (sx, sy)))
+        for _, rk, (sx, sy) in sorted(rim_props, key=lambda it: -it[0]):
+            if rk == "boulder":
+                boulder(pen, *P(sx, sy, 0.0), rng.uniform(3.6, 5.8))
+            else:
+                pen.tuft(*P(sx, sy, 0.0), rng.uniform(3.2, 5.0))
         if has_steps:
             _trail_3d(pen, P, rng, x_m + tL + 1.0, 0.0, (1.0, 0.0), tw * 0.58, rng.uniform(14, 22))
 
@@ -1258,7 +1283,7 @@ def cave_lair(pen, P, rng):
     fns[int(rng.choice(len(fns), p=np.array(wts) / sum(wts)))](pen, P, rng)
 
 
-# --------------------------------------------------------------------------- 5 & 6. Burrows & Warrens (3D 3/4 Aerial View!)
+# --------------------------------------------------------------------------- 5. Burrows (3D 3/4 Aerial View!)
 
 def _gnarled_oak_3d(pen, P, rng, wx, wy, wz, h, exit_ang):
     """3D woodland oak perched atop a burrow bank with gnarled surface roots radiating across the 3/4 ground plane."""
@@ -1274,211 +1299,98 @@ def _gnarled_oak_3d(pen, P, rng, wx, wy, wz, h, exit_ang):
         pen.stroke([p0, p1, p2], W0 * (0.78 if abs(off) < 0.7 else 0.56), taper=(0.05, 0.88), smooth=1, wobble=0.14)
 
 
-def burrow_lair(pen, P, rng, warren=None):
-    """True 3D 3/4 top-down Burrow (root-hollow / earth-bank pit) OR sprawling honeycombed Warren colony (ZERO train tunnels!)."""
-    if warren is None:
-        warren = rng.random() >= 0.6
-
-    if not warren:
-        # SINGLE BURROW: gentle 3D grassy knoll seen from 34° above with an oblique dug earth-pit under roots/turf!
-        rx, ry, H = rng.uniform(44, 58), rng.uniform(34, 46), rng.uniform(16, 25)
-        cx_w, cy_w = 0.0, 8.0
-
-        def h_fn(x, y):
-            r2 = ((x - cx_w) / rx) ** 2 + ((y - cy_w) / ry) ** 2
-            if r2 >= 1.0:
-                return 0.0
-            return H * ((1.0 - r2) ** 1.35)
-
-        _hill_3d(pen, P, rng, h_fn, rx, ry, cx=cx_w, cy=cy_w, rocky=False, shade_scale=0.92)
-
-        # Pick an oblique 3/4 exit angle facing either south-west (-y) OR south-east (+x)!
-        exit_ang = rng.uniform(-math.pi * 0.68, -math.pi * 0.35) if rng.random() < 0.58 else rng.uniform(-0.28, 0.22)
-        bx = cx_w + math.cos(exit_ang) * rx * 0.52
-        by = cy_w + math.sin(exit_ang) * ry * 0.52
-        bz = h_fn(bx, by)
-        rm = rng.uniform(9.5, 13.5)
-
-        # Place woodland tree(s), scalloped bushes & optional mossy stone cleanly off to the knoll shoulders
-        # (strictly clear of the burrow lip & each other — NEVER a lollipop trunk centered atop the hole!)
-        props = [(P.depth(bx, by), "pit", (bx, by, bz))]
-        pit_sx, _ = P(bx, by, bz)
-        trees_xy = []
-        bushes_xy = []
-
-        if rng.random() < 0.78:
-            side = int(rng.choice([-1, 1]))
-            n_trees = 2 if rng.random() < 0.25 else 1
-            for k in range(n_trees):
-                sgn = side if k == 0 else -side
-                for _ in range(30):
-                    # Upper/rear left or right shoulder of the 3D grassy knoll
-                    ang_t = rng.uniform(0.32, 1.35) if sgn > 0 else rng.uniform(1.75, 2.82)
-                    rr = rng.uniform(0.42, 0.84)
-                    tx, ty = cx_w + rx * rr * math.cos(ang_t), cy_w + ry * rr * math.sin(ang_t)
-                    tz = h_fn(tx, ty)
-                    tsx, _ = P(tx, ty, tz)
-                    if (math.hypot(tx - bx, ty - by) > rm * 2.15
-                            and abs(tsx - pit_sx) > rm * 1.25
-                            and all(math.hypot(tx - ox, ty - oy) > 20.0 for ox, oy in trees_xy)):
-                        trees_xy.append((tx, ty))
-                        props.append((P.depth(tx, ty), "tree", (tx, ty, tz, rng.uniform(22, 34))))
-                        break
-
-        for _ in range(int(rng.integers(2, 4))):
-            for _ in range(25):
-                ang_b = rng.uniform(0.0, TAU)
-                rr = rng.uniform(0.35, 0.92)
-                px, py = cx_w + rx * rr * math.cos(ang_b), cy_w + ry * rr * math.sin(ang_b)
-                if (math.hypot(px - bx, py - by) > rm * 1.75
-                        and all(math.hypot(px - tx, py - ty) > 16.0 for tx, ty in trees_xy)
-                        and all(math.hypot(px - ox, py - oy) > 14.0 for ox, oy in bushes_xy)):
-                    bushes_xy.append((px, py))
-                    props.append((P.depth(px, py), "bush", (px, py, h_fn(px, py))))
-                    break
-
-        if rng.random() < 0.35:
-            sgn = int(rng.choice([-1, 1]))
-            ang_r = exit_ang + sgn * rng.uniform(0.85, 1.35)
-            rx_p, ry_p = bx + math.cos(ang_r) * rm * 1.65, by + math.sin(ang_r) * rm * 1.65
-            if all(math.hypot(rx_p - tx, ry_p - ty) > 14.0 for tx, ty in trees_xy):
-                props.append((P.depth(rx_p, ry_p), "stone_b", (rx_p, ry_p, h_fn(rx_p, ry_p))))
-
-        for _ in range(rng.integers(6, 10)):
-            t = rng.uniform(0, TAU)
-            rr = rng.uniform(0.25, 1.18)
-            gx, gy = cx_w + rx * rr * math.cos(t), cy_w + ry * rr * math.sin(t)
-            if math.hypot(gx - bx, gy - by) > rm * 1.45:
-                props.append((P.depth(gx, gy), "tuft", (gx, gy, h_fn(gx, gy))))
-
-        for _, kind, args in sorted(props, key=lambda it: -it[0]):
-            if kind == "pit":
-                _burrow_pit_3d(pen, P, rng, args[0], args[1], args[2], rm, exit_ang, spoil=True, roots=True)
-                _trail_3d(pen, P, rng, args[0] + math.cos(exit_ang) * rm * 0.9,
-                          args[1] + math.sin(exit_ang) * rm * 0.9,
-                          (math.cos(exit_ang), math.sin(exit_ang)), rm * 0.85, rng.uniform(22, 32), z_fn=h_fn)
-            elif kind == "tree":
-                _place_tree(pen, *P(args[0], args[1], args[2]), args[3])
-            elif kind == "bush":
-                pen.bush(*P(*args), rng.uniform(5.0, 7.8), outline=True)
-            elif kind == "stone_b":
-                boulder(pen, *P(*args), rng.uniform(4.2, 6.8))
-            else:
-                pen.tuft(*P(*args), rng.uniform(3.0, 4.8))
-        return
-
-    # WARREN: True 3D 3/4 TOP-DOWN sprawling honeycombed burrow colony!
-    # Broad low rolling grassy knoll + 4-6 oblique ground-dug burrow pits scattered across the 3D hillside & meadow!
-    rx, ry, H = rng.uniform(68, 86), rng.uniform(50, 64), rng.uniform(20, 30)
-    cx_w, cy_w = 0.0, 12.0
-    lobe_x = rng.choice([-1, 1]) * rx * rng.uniform(0.25, 0.36)
-    lobe_y = cy_w + rng.uniform(-ry * 0.12, ry * 0.18)
+def burrow_lair(pen, P, rng):
+    """True 3D 3/4 top-down Burrow: gentle grassy knoll with an oblique dug earth-pit, spoil heap & woodland trail."""
+    rx, ry, H = rng.uniform(44, 58), rng.uniform(34, 46), rng.uniform(16, 25)
+    cx_w, cy_w = 0.0, 8.0
 
     def h_fn(x, y):
-        r1 = ((x - cx_w) / rx) ** 2 + ((y - cy_w) / ry) ** 2
-        r2 = ((x - lobe_x) / (rx * 0.62)) ** 2 + ((y - lobe_y) / (ry * 0.62)) ** 2
-        h1 = H * (max(0.0, 1.0 - r1) ** 1.35) if r1 < 1.0 else 0.0
-        h2 = H * 0.72 * (max(0.0, 1.0 - r2) ** 1.35) if r2 < 1.0 else 0.0
-        return max(h1, h2)
+        r2 = ((x - cx_w) / rx) ** 2 + ((y - cy_w) / ry) ** 2
+        if r2 >= 1.0:
+            return 0.0
+        return H * ((1.0 - r2) ** 1.35)
 
-    _hill_3d(pen, P, rng, h_fn, rx * 1.05, ry * 1.05, cx=cx_w, cy=cy_w, rocky=False, shade_scale=0.95)
+    _hill_3d(pen, P, rng, h_fn, rx, ry, cx=cx_w, cy=cy_w, rocky=False, shade_scale=0.92)
 
-    # Scatter 4-6 oblique 3D burrow holes across the visible south/east slopes AND surrounding front meadow!
-    holes = []  # (x, y, z, r_m, exit_ang)
-    n_target = int(rng.integers(4, 7))
-    # Ensure a mix of hillside holes (on the south/east flanks) and sunken meadow apron holes!
-    for attempt in range(140):
-        if len(holes) >= n_target:
-            break
-        if len(holes) < 2:
-            # Upper/mid hillside holes facing radially downhill (south-west to east!)
-            ang = rng.uniform(-math.pi * 0.78, 0.22)
-            rr = rng.uniform(0.32, 0.66)
-        else:
-            # Lower flank & meadow holes scattered naturally across the 3/4 clearing!
-            ang = rng.uniform(-math.pi * 0.85, 0.30)
-            rr = rng.uniform(0.65, 1.15)
-        hx = cx_w + rx * rr * math.cos(ang)
-        hy = cy_w + ry * rr * math.sin(ang)
-        rm = rng.uniform(8.8, 12.2) if len(holes) == 0 else rng.uniform(6.8, 10.2)
-        if all(math.hypot(hx - ox, hy - oy) > (rm + orm) * 2.25 for ox, oy, _, orm, _ in holes):
-            # Face radially outward/downhill with slight organic variation
-            ex_ang = math.atan2(hy - cy_w, hx - cx_w) + rng.normal(0, 0.25)
-            # Clamp exit angle so holes always face generally toward the viewer (south/east hemispheres)
-            ex_ang = float(np.clip(ex_ang, -math.pi * 0.85, 0.35))
-            holes.append((hx, hy, h_fn(hx, hy), rm, ex_ang))
+    # Pick an oblique 3/4 exit angle facing either south-west (-y) OR south-east (+x)!
+    exit_ang = rng.uniform(-math.pi * 0.68, -math.pi * 0.35) if rng.random() < 0.58 else rng.uniform(-0.28, 0.22)
+    bx = cx_w + math.cos(exit_ang) * rx * 0.52
+    by = cy_w + math.sin(exit_ang) * ry * 0.52
+    bz = h_fn(bx, by)
+    rm = rng.uniform(9.5, 13.5)
 
-    # Subtle broken stippled animal-track wisps meandering between nearby warren holes (never a single rigid wire!)
-    for i in range(len(holes)):
-        hx, hy, hz, rm, ex_ang = holes[i]
-        others = [j for j in range(len(holes)) if j != i]
-        if others:
-            j = min(others, key=lambda k: math.hypot(holes[k][0] - hx, holes[k][1] - hy))
-            if i < j:
-                nx, ny, _, _, _ = holes[j]
-                dist = math.hypot(nx - hx, ny - hy)
-                if dist < 68:
-                    mx_p = (hx + nx) * 0.5 + rng.normal(0, 7.0)
-                    my_p = (hy + ny) * 0.5 + rng.normal(0, 6.0)
-                    for t in np.linspace(0.20, 0.80, int(dist / 5.5)):
-                        qx = (1 - t) ** 2 * hx + 2 * (1 - t) * t * mx_p + t ** 2 * nx
-                        qy = (1 - t) ** 2 * hy + 2 * (1 - t) * t * my_p + t ** 2 * ny
-                        sx, sy = P(qx, qy, h_fn(qx, qy))
-                        pen.cv.disc(sx + rng.normal(0, 1.6), sy + rng.normal(0, 1.0), rng.uniform(0.45, 0.72))
+    # Place woodland tree(s), scalloped bushes & optional mossy stone cleanly off to the knoll shoulders
+    # (strictly clear of the burrow lip & each other — NEVER a lollipop trunk centered atop the hole!)
+    props = [(P.depth(bx, by), "pit", (bx, by, bz))]
+    pit_sx, _ = P(bx, by, bz)
+    trees_xy = []
+    bushes_xy = []
 
-    # Depth-sort ALL 3D warren elements (trees, bushes, burrow pits, grass tufts) strictly back-to-front!
-    props = [(P.depth(hx, hy), "pit", (hx, hy, hz, rm, ex_ang, idx == 0))
-             for idx, (hx, hy, hz, rm, ex_ang) in enumerate(holes)]
+    if rng.random() < 0.78:
+        side = int(rng.choice([-1, 1]))
+        n_trees = 2 if rng.random() < 0.25 else 1
+        for k in range(n_trees):
+            sgn = side if k == 0 else -side
+            for _ in range(30):
+                # Upper/rear left or right shoulder of the 3D grassy knoll
+                ang_t = rng.uniform(0.32, 1.35) if sgn > 0 else rng.uniform(1.75, 2.82)
+                rr = rng.uniform(0.42, 0.84)
+                tx, ty = cx_w + rx * rr * math.cos(ang_t), cy_w + ry * rr * math.sin(ang_t)
+                tz = h_fn(tx, ty)
+                tsx, _ = P(tx, ty, tz)
+                if (math.hypot(tx - bx, ty - by) > rm * 2.15
+                        and abs(tsx - pit_sx) > rm * 1.25
+                        and all(math.hypot(tx - ox, ty - oy) > 20.0 for ox, oy in trees_xy)):
+                    trees_xy.append((tx, ty))
+                    props.append((P.depth(tx, ty), "tree", (tx, ty, tz, rng.uniform(22, 34))))
+                    break
 
-    # 1-2 woodland trees anchoring the rear/flanking knoll ridges (well-spaced from holes & each other)
-    w_trees = []
-    for _ in range(int(rng.integers(1, 3))):
-        for _ in range(20):
-            ang_t = rng.uniform(0.35, math.pi * 0.95)
-            rr = rng.uniform(0.38, 0.85)
-            tx, ty = cx_w + rx * rr * math.cos(ang_t), cy_w + ry * rr * math.sin(ang_t)
-            if (all(math.hypot(tx - hx, ty - hy) > 22 for hx, hy, _, _, _ in holes)
-                    and all(math.hypot(tx - ox, ty - oy) > 18 for ox, oy in w_trees)):
-                w_trees.append((tx, ty))
-                props.append((P.depth(tx, ty), "tree", (tx, ty, h_fn(tx, ty))))
+    dir_ex = (math.cos(exit_ang), math.sin(exit_ang))
+    for _ in range(int(rng.integers(2, 4))):
+        for _ in range(30):
+            ang_b = rng.uniform(0.0, TAU)
+            rr = rng.uniform(0.35, 0.90)
+            px, py = cx_w + rx * rr * math.cos(ang_b), cy_w + ry * rr * math.sin(ang_b)
+            # Keep clear of both the burrow mouth AND the outgoing dirt trail!
+            dx_b, dy_b = px - bx, py - by
+            along = dx_b * dir_ex[0] + dy_b * dir_ex[1]
+            perp = abs(-dx_b * dir_ex[1] + dy_b * dir_ex[0])
+            on_trail = (along > -rm * 0.5 and along < 36.0 and perp < rm * 1.15)
+            if (not on_trail and math.hypot(dx_b, dy_b) > rm * 1.85
+                    and all(math.hypot(px - tx, py - ty) > 16.0 for tx, ty in trees_xy)
+                    and all(math.hypot(px - ox, py - oy) > 14.0 for ox, oy in bushes_xy)):
+                bushes_xy.append((px, py))
+                props.append((P.depth(px, py), "bush", (px, py, h_fn(px, py))))
                 break
 
-    # Scalloped bramble bushes tucked naturally around the warren knoll (clear of tree trunks & holes!)
-    w_bushes = []
-    for _ in range(rng.integers(2, 5)):
-        for _ in range(20):
-            ang_b = rng.uniform(0, TAU)
-            rr = rng.uniform(0.25, 1.05)
-            bx, by = cx_w + rx * rr * math.cos(ang_b), cy_w + ry * rr * math.sin(ang_b)
-            if (all(math.hypot(bx - hx, by - hy) > 18 for hx, hy, _, _, _ in holes)
-                    and all(math.hypot(bx - tx, by - ty) > 15 for tx, ty in w_trees)
-                    and all(math.hypot(bx - ox, by - oy) > 13 for ox, oy in w_bushes)):
-                w_bushes.append((bx, by))
-                props.append((P.depth(bx, by), "bush", (bx, by, h_fn(bx, by))))
-                break
+    if rng.random() < 0.35:
+        sgn = int(rng.choice([-1, 1]))
+        ang_r = exit_ang + sgn * rng.uniform(0.85, 1.35)
+        rx_p, ry_p = bx + math.cos(ang_r) * rm * 1.65, by + math.sin(ang_r) * rm * 1.65
+        if all(math.hypot(rx_p - tx, ry_p - ty) > 14.0 for tx, ty in trees_xy):
+            props.append((P.depth(rx_p, ry_p), "stone_b", (rx_p, ry_p, h_fn(rx_p, ry_p))))
 
-    # Grass tufts across the grassy hillside & clearing
-    for _ in range(rng.integers(10, 16)):
-        ang_g = rng.uniform(0, TAU)
-        rr = rng.uniform(0.15, 1.25)
-        gx, gy = cx_w + rx * rr * math.cos(ang_g), cy_w + ry * rr * math.sin(ang_g)
-        if all(math.hypot(gx - hx, gy - hy) > 13 for hx, hy, _, _, _ in holes):
+    for _ in range(rng.integers(6, 10)):
+        t = rng.uniform(0, TAU)
+        rr = rng.uniform(0.25, 1.18)
+        gx, gy = cx_w + rx * rr * math.cos(t), cy_w + ry * rr * math.sin(t)
+        if math.hypot(gx - bx, gy - by) > rm * 1.45:
             props.append((P.depth(gx, gy), "tuft", (gx, gy, h_fn(gx, gy))))
 
     for _, kind, args in sorted(props, key=lambda it: -it[0]):
         if kind == "pit":
-            hx, hy, hz, rm, ex_ang, is_main = args
-            _burrow_pit_3d(pen, P, rng, hx, hy, hz, rm, ex_ang, spoil=True, roots=True)
-            if is_main or rng.random() < 0.45:
-                _trail_3d(pen, P, rng, hx + math.cos(ex_ang) * rm * 0.85,
-                          hy + math.sin(ex_ang) * rm * 0.85,
-                          (math.cos(ex_ang), math.sin(ex_ang)), rm * 0.72, rng.uniform(14, 24), z_fn=h_fn, stones=False)
+            _burrow_pit_3d(pen, P, rng, args[0], args[1], args[2], rm, exit_ang, spoil=True, roots=True)
+            _trail_3d(pen, P, rng, args[0] + math.cos(exit_ang) * rm * 0.9,
+                      args[1] + math.sin(exit_ang) * rm * 0.9,
+                      (math.cos(exit_ang), math.sin(exit_ang)), rm * 0.85, rng.uniform(22, 32), z_fn=h_fn)
         elif kind == "tree":
-            _place_tree(pen, *P(*args), rng.uniform(22, 34), kind=str(rng.choice(["round", "spruce"])))
+            _place_tree(pen, *P(args[0], args[1], args[2]), args[3])
         elif kind == "bush":
-            pen.bush(*P(*args), rng.uniform(4.8, 7.6), outline=True)
+            pen.bush(*P(*args), rng.uniform(5.0, 7.8), outline=True)
+        elif kind == "stone_b":
+            boulder(pen, *P(*args), rng.uniform(4.2, 6.8))
         else:
-            pen.tuft(*P(*args), rng.uniform(2.8, 4.6))
+            pen.tuft(*P(*args), rng.uniform(3.0, 4.8))
 
 
 # --------------------------------------------------------------------------- nests & crag eyries

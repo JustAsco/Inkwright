@@ -165,9 +165,18 @@ def _boundary(pen, P, a, b, kind):
 
 
 def fields(pen, P, rng):
-    """Organic farmland patchwork: plowed furrows, grain, orchards, vineyards, hedges, stone walls."""
-    nx, ny = int(rng.integers(2, 4)), int(rng.integers(2, 4))
-    W, D = rng.uniform(140, 195), rng.uniform(90, 128)
+    """Organic farmland patchwork in varied shapes: wide (E-W), tall (N-S), or rounded/equilibrated."""
+    shape = str(rng.choice(["wide", "tall", "round"], p=[0.34, 0.33, 0.33]))
+    if shape == "wide":
+        nx, ny = int(rng.choice([2, 3, 3])), int(rng.choice([2, 2, 3]))
+        W, D = rng.uniform(148, 195), rng.uniform(82, 114)
+    elif shape == "tall":
+        nx, ny = int(rng.choice([2, 2, 3])), int(rng.choice([2, 3, 3]))
+        W, D = rng.uniform(84, 116), rng.uniform(146, 192)
+    else:
+        nx, ny = 3, 3
+        W = rng.uniform(128, 158)
+        D = W * rng.uniform(0.92, 1.08)
     cx = np.concatenate([[0], np.cumsum(rng.uniform(0.7, 1.35, nx))])
     cy = np.concatenate([[0], np.cumsum(rng.uniform(0.7, 1.35, ny))])
     cx, cy = cx / cx[-1] * W - W / 2, cy / cy[-1] * D - D / 2
@@ -176,12 +185,19 @@ def fields(pen, P, rng):
            cy[j] + rng.normal(0, 4.5 if 0 < j < ny else 2.2))
           for j in range(ny + 1)] for i in range(nx + 1)]
     skip = set()
-    if rng.random() < 0.45:
-        skip.add((0, ny - 1))
-    if rng.random() < 0.45:
-        skip.add((nx - 1, 0))
-    if nx * ny >= 6 and rng.random() < 0.35:
-        skip.add((0, 0) if rng.random() < 0.5 else (nx - 1, ny - 1))
+    if shape == "round":
+        # Trim 2-4 outer corners of the 3x3 grid into an equilibrated rounded/octagonal patchwork!
+        corners = [(0, 0), (nx - 1, 0), (0, ny - 1), (nx - 1, ny - 1)]
+        rng.shuffle(corners)
+        for c in corners[:int(rng.integers(2, 5))]:
+            skip.add(c)
+    else:
+        if rng.random() < 0.45:
+            skip.add((0, ny - 1))
+        if (nx * ny >= 6 or not skip) and rng.random() < 0.45:
+            skip.add((nx - 1, 0))
+        if nx * ny >= 6 and rng.random() < 0.35:
+            skip.add((0, 0) if rng.random() < 0.5 else (nx - 1, ny - 1))
 
     extras, cells = [], []
     for i in range(nx):
@@ -441,16 +457,18 @@ def _spur(pen, pts, i):
         pen.stroke([(x + dx, y), (x + dx + 0.3, y + rng.uniform(2.0, 3.6))], W0 * 0.62, taper=(0.05, 0.85), wobble=0)
 
 
-def _edge_line(pen, pts, w=1.18, closed=False):
+def _edge_line(pen, pts, w=1.18, closed=False, line_taper=(0.15, 0.15)):
     if closed:
         pen.closed(pts, pen.width * w, wobble=0.12, pressure=0.22)
     else:
-        # Cleanly tapered open ends so overlapping pieces merge without blunt ink stubs
-        pen.stroke(pts, pen.width * w, taper=(0.15, 0.15), taper_max=18, wobble=0.1, pressure=0.25, min_w=0.06)
+        # Cleanly tapered open ends so overlapping pieces merge (or neutralize gracefully to flat ground)
+        pen.stroke(pts, pen.width * w, taper=line_taper, taper_max=34 if max(line_taper) > 0.35 else 18,
+                   wobble=0.1, pressure=0.25, min_w=0.05)
 
 
 def escarp(pen, pts, low, hmax, mask=None, spurs=True, line=True, line_w=1.18,
-           density=1.0, jag=1.25, closed=False, floor_clip=None, open_ends=(True, True)):
+           density=1.0, jag=1.25, closed=False, floor_clip=None, open_ends=(True, True),
+           line_taper=(0.15, 0.15)):
     """Edge whose low ground lies along `low` (unit vectors). The face shows where the drop faces
     the viewer (low side pointing down-screen) and fades smoothly as the edge turns away."""
     rng = pen.rng
@@ -485,7 +503,7 @@ def escarp(pen, pts, low, hmax, mask=None, spurs=True, line=True, line_w=1.18,
                 if not on[k] and low[k][1] > -0.25:
                     _spur(pen, pts, k)
     if line:
-        _edge_line(pen, pts, line_w, closed=closed)
+        _edge_line(pen, pts, line_w, closed=closed, line_taper=line_taper)
     return pts
 
 
@@ -513,6 +531,48 @@ def cliff(pen, P, rng, heading=None):
 def cliff_steep(pen, P, rng):
     """Open stackable steep diagonal escarpment run matching corner & canyon slopes."""
     cliff(pen, P, rng, heading=float(rng.choice([1, -1]) * rng.uniform(0.72, 1.02)))
+
+
+# --- neutralizing cliff ramp-down ends (taper a cliff ridge cleanly down to flat ground) -------
+
+CLIFF_END_ROLES = {
+    # role: (heading along travel left->right / diag with low ground on right-hand side, fade_start)
+    # fade_start=True means the start of the path fades out to 0; False means the end fades out to 0.
+    "left": (0.0, True),        # fades out west (<===), connects on east
+    "right": (0.0, False),      # connects on west, fades out east (===>)
+    "diag_nw": (0.85, True),    # \ cliff fading out toward upper-left (NW), connects lower-right
+    "diag_se": (0.85, False),   # \ cliff connecting upper-left, fading out toward lower-right (SE)
+    "diag_sw": (-0.85, True),   # / cliff fading out toward lower-left (SW), connects upper-right
+    "diag_ne": (-0.85, False),  # / cliff connecting lower-left, fading out toward upper-right (NE)
+}
+
+
+def cliff_end(pen, P, rng, role=None):
+    """Neutralizing cliff end-cap: enters at full FACE_H on one end and slopes smoothly down to flat ground."""
+    role = role or str(rng.choice(list(CLIFF_END_ROLES)))
+    base_h, fade_start = CLIFF_END_ROLES[role]
+    heading = base_h + float(rng.normal(0.0, 0.08))
+    pts = edge_path(rng, rng.uniform(82, 128), heading, wiggle=0.14, kinks=0.12) + (P.ox, P.oy)
+    n = len(pts)
+    u = np.linspace(0.0, 1.0, n)
+    # Smooth geological ramp-down from 1.0 at the connecting end to 0.0 at the neutralizing end
+    ramp_u = u if fade_start else (1.0 - u)
+    mask = np.clip((ramp_u - 0.14) / 0.68, 0.0, 1.0) ** 1.35
+    open_ends = (False, True) if fade_start else (True, False)
+    line_taper = (0.64, 0.14) if fade_start else (0.14, 0.64)
+    jpts = escarp(pen, pts, right_normals(pts), rng.uniform(*FACE_H), mask=mask,
+                  spurs=False, open_ends=open_ends, line_taper=line_taper)
+    # Subtle fading hillside slope ticks spilling gently off the vanishing ramp into flat ground
+    nr = right_normals(jpts)
+    W0 = pen.width
+    tip_idx = int(len(jpts) * (0.16 if fade_start else 0.84))
+    for k_off in (-3, 0, 3):
+        idx = int(np.clip(tip_idx + k_off, 2, len(jpts) - 3))
+        if nr[idx, 1] > 0.15 and rng.random() < 0.72:
+            p0 = jpts[idx]
+            sl = rng.uniform(3.5, 6.5)
+            p1 = (p0[0] + rng.normal(0.4, 0.6), p0[1] + sl)
+            pen.stroke([p0, p1], W0 * 0.42, taper=(0.25, 0.90), wobble=0.08)
 
 
 # --- curves: arcs of an elliptical outline (perspective-squashed), convex or concave -------------
@@ -563,49 +623,20 @@ def cliff_curve(pen, P, rng, role=None, inner=False):
 
 
 def mesa(pen, P, rng):
-    """Complete flat-topped sandstone/limestone mesa plateau with crisp closed rim (ready for landmarks on top)."""
-    rx = rng.uniform(48, 84)
-    ry = rx * rng.uniform(0.50, 0.62)
+    """Complete flat-topped mesa plateau in wide, tall/deep, or rounded shapes (stack freely for terraced hills!)."""
+    shape = str(rng.choice(["wide", "tall", "round"], p=[0.38, 0.30, 0.32]))
+    if shape == "wide":
+        rx = rng.uniform(56, 88)
+        ry = rx * rng.uniform(0.46, 0.58)
+    elif shape == "tall":
+        rx = rng.uniform(44, 62)
+        ry = rx * rng.uniform(0.84, 1.08)
+    else:
+        rx = rng.uniform(52, 74)
+        ry = rx * rng.uniform(0.66, 0.80)
     pts, out = ring_pts(rng, rx, ry, -0.5 * np.pi, 1.5 * np.pi, wob=0.065, closed=True)
     pts = pts + (P.ox, P.oy)
     escarp(pen, pts, out, rng.uniform(*FACE_H), jag=1.25, closed=True, open_ends=(False, False))
-
-
-def _inside(poly, x, y):
-    inside = False
-    for i in range(len(poly)):
-        (x1, y1), (x2, y2) = poly[i], poly[(i + 1) % len(poly)]
-        if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
-            inside = not inside
-    return inside
-
-
-def terraced_hill(pen, P, rng):
-    """Two to four stacked craggy plateau terraces forming a stepped hill or mountain butte."""
-    tiers = int(rng.integers(2, 5))
-    rx = rng.uniform(72, 98)
-    ry = rx * rng.uniform(0.50, 0.60)
-    cx, cy = P.ox, P.oy + 18
-    drift = rng.choice([-1, 1]) * rng.uniform(0.06, 0.14)  # cohesive geological lean
-    rings = []
-    for k in range(tiers):
-        hmax = rng.uniform(FACE_H[0] * 0.92, FACE_H[1] * 0.95)
-        pts, out = ring_pts(rng, rx, ry, -0.5 * np.pi, 1.5 * np.pi, wob=0.065, closed=True)
-        # Pre-jag each closed ring once so occlusion tests match the drawn rim exactly!
-        jpts, jout = jagged(rng, pts + (cx, cy), out, amp=1.2, closed=True)
-        rings.append((jpts, jout, hmax, cx, cy, rx, ry))
-        shrink = rng.uniform(0.58, 0.74)
-        cx += drift * rx + rng.normal(0, rx * 0.05)
-        cy -= ry * (1.0 - shrink) * 0.85 + hmax * 0.55
-        rx, ry = rx * shrink, ry * shrink
-        if rx < 17:
-            break
-
-    # Draw bottom-to-top, clearing each upper plateau's footprint so lower cliff washes stay crisp!
-    for k, (jpts, jout, hmax, rcx, rcy, rrx, rry) in enumerate(rings):
-        if k > 0:
-            pen.cv.clear(jpts)  # cleanly hide lower tier rim & wash behind the upper terrace!
-        escarp(pen, jpts, jout, hmax, jag=0.0, closed=True, open_ends=(False, False), spurs=(k == len(rings) - 1))
 
 
 # --- stackable canyons -------------------------------------------------------------------------
@@ -633,6 +664,32 @@ def _safe_offset_rim(centre, nr, offset):
     return out
 
 
+def _make_rim_clipper(rim_pts):
+    """Return y-upper-bound lookup for points falling directly above a front-facing canyon rim."""
+    rx, ry = rim_pts[:, 0], rim_pts[:, 1]
+    xmin, xmax = float(rx.min()), float(rx.max())
+    if xmax - xmin < 4.0:
+        return None
+
+    def clip_y(x):
+        if x < xmin or x > xmax:
+            return None
+        best = None
+        for i in range(len(rx) - 1):
+            x0, x1 = rx[i], rx[i + 1]
+            if (x0 <= x <= x1) or (x1 <= x <= x0):
+                if abs(x1 - x0) < 1e-6:
+                    yy = min(ry[i], ry[i + 1])
+                else:
+                    f = (x - x0) / (x1 - x0)
+                    yy = ry[i] + (ry[i + 1] - ry[i]) * f
+                if best is None or yy > best:
+                    best = yy
+        return None if best is None else best - 0.6
+
+    return clip_y
+
+
 def _canyon_from_centre(pen, centre, width, rng):
     """Draw a two-rimmed canyon with near-rim floor occlusion and cleanly tapered stackable ends."""
     W0 = pen.width
@@ -642,42 +699,13 @@ def _canyon_from_centre(pen, centre, width, rng):
     left = _safe_offset_rim(centre, nr, -hw)
     right = _safe_offset_rim(centre, nr, hw)
 
-    # Identify which rim sits lower on screen (nearer to the viewer) to clip the far canyon wall!
-    # Also handle bends where either rim can be the far/facing wall depending on local orientation.
     left_j, nr_l = jagged(rng, left, nr, amp=1.15, closed=False)
     right_j, nr_r = jagged(rng, right, -nr, amp=1.15, closed=False)
 
-    def make_clipper(rim_pts):
-        """Return y-upper-bound lookup for points falling directly above a front-facing rim."""
-        rx, ry = rim_pts[:, 0], rim_pts[:, 1]
-        # Build piecewise-min y envelope over x bins only where the rim spans horizontally
-        xmin, xmax = float(rx.min()), float(rx.max())
-        if xmax - xmin < 4.0:
-            return None
-
-        def clip_y(x):
-            if x < xmin or x > xmax:
-                return None
-            # Find segments crossing x and take the highest (smallest y) rim crossing below the wall
-            best = None
-            for i in range(len(rx) - 1):
-                x0, x1 = rx[i], rx[i + 1]
-                if (x0 <= x <= x1) or (x1 <= x <= x0):
-                    if abs(x1 - x0) < 1e-6:
-                        yy = min(ry[i], ry[i + 1])
-                    else:
-                        f = (x - x0) / (x1 - x0)
-                        yy = ry[i] + (ry[i + 1] - ry[i]) * f
-                    if best is None or yy > best:
-                        best = yy
-            return None if best is None else best - 0.6
-
-        return clip_y
-
     # Determine which rim has the lower mean y (higher on screen = far rim facing viewer)
     hmax = min(FACE_H[1] * 1.15, float(np.median(width)) * 0.82)
-    clip_for_left = make_clipper(right_j) if left_j[:, 1].mean() < right_j[:, 1].mean() else None
-    clip_for_right = make_clipper(left_j) if right_j[:, 1].mean() < left_j[:, 1].mean() else None
+    clip_for_left = _make_rim_clipper(right_j) if left_j[:, 1].mean() < right_j[:, 1].mean() else None
+    clip_for_right = _make_rim_clipper(left_j) if right_j[:, 1].mean() < left_j[:, 1].mean() else None
 
     # Draw far wall first (clipped cleanly at near rim!), then smooth canyon floor accent, then near rim!
     escarp(pen, left_j, nr_l, hmax, density=1.15, jag=0.0, floor_clip=clip_for_left)
@@ -719,3 +747,95 @@ def canyon_bend(pen, P, rng):
     centre, _ = ring_pts(rng, rx, ry, t0, t1, wob=0.025, closed=False)
     centre = centre - centre.mean(0) + (P.ox, P.oy)
     _canyon_from_centre(pen, centre, _width_profile(rng, len(centre), base=21.5), rng)
+
+
+# --- neutralizing canyon ends (pinch-out ravine tips, box-canyon headwalls & flared fade-outs) -
+
+CANYON_END_ROLES = {
+    # role: heading (radians in screen coords) traveling from open connecting mouth -> neutralizing end
+    "left": math.pi,          # connects on right, ends/neutralizes on left (<===)
+    "right": 0.0,             # connects on left, ends/neutralizes on right (===>)
+    "north": -math.pi * 0.5,  # connects on bottom, ends/neutralizes going north/up
+    "south": math.pi * 0.5,   # connects on top, ends/neutralizes going south/down
+}
+
+
+def canyon_end(pen, P, rng, role=None):
+    """Neutralizing canyon end-cap: pinch-out ravine tip, box-canyon cliff headwall, or flared valley fade-out."""
+    W0 = pen.width
+    role = role or str(rng.choice(list(CANYON_END_ROLES)))
+    heading = CANYON_END_ROLES[role] + float(rng.normal(0.0, 0.06))
+    style = str(rng.choice(["pinch", "box", "flare"], p=[0.46, 0.34, 0.20]))
+
+    L = rng.uniform(86, 126) if style != "box" else rng.uniform(76, 108)
+    centre = edge_path(rng, L, heading, wiggle=0.16, kinks=0.06) + (P.ox, P.oy)
+    n = len(centre)
+    u = np.linspace(0.0, 1.0, n)  # u=0 at open stackable mouth, u=1 at neutralizing tip
+    nr = right_normals(centre)
+    w0 = rng.uniform(20.5, 23.5)
+
+    if style == "box":
+        # Continuous rocky U-shaped box-canyon amphitheater headwall closing cleanly around u = 1!
+        hw = (w0 * 0.5) * (1.0 - 0.10 * (u ** 1.4))
+        rim_l = _safe_offset_rim(centre, nr, -hw)
+        rim_r = _safe_offset_rim(centre, nr, hw)
+        # Smooth semicircular U-cap joining rim_l[-1] -> apex -> rim_r[-1]
+        tip = centre[-1]
+        tang = centre[-1] - centre[-2]
+        tang /= max(1e-6, float(np.hypot(*tang)))
+        n_end = nr[-1]
+        r_cap = float(hw[-1])
+        cap_angles = np.linspace(-math.pi * 0.5, math.pi * 0.5, 11)[1:-1]
+        cap_pts = [tip + tang * (r_cap * 1.12 * math.cos(a)) + n_end * (r_cap * math.sin(a)) for a in cap_angles]
+        cap_low = [-(tang * math.cos(a) + n_end * math.sin(a)) for a in cap_angles]
+        # Assemble single continuous U-rim from mouth-left -> U-cap -> mouth-right, low always pointing INWARD!
+        u_pts = np.vstack([rim_l, cap_pts, rim_r[::-1]])
+        u_low = np.vstack([nr, cap_low, -nr[::-1]])
+        u_j, u_low_j = jagged(rng, u_pts, u_low, amp=1.10, closed=False)
+
+        # Clip upper/headwall cliff wash strictly above the near/bottom rim so wash stays inside the canyon!
+        near_rim = rim_r if rim_r[:, 1].mean() > rim_l[:, 1].mean() else rim_l
+        floor_clip = _make_rim_clipper(near_rim) if role in ("left", "right") else None
+        hmax = min(FACE_H[1] * 1.12, w0 * 0.80)
+        escarp(pen, u_j, u_low_j, hmax, density=1.15, jag=0.0, floor_clip=floor_clip,
+               open_ends=(True, True), line_taper=(0.14, 0.14))
+        # Subtle dry-bed creek emerging from the box-canyon headwall
+        if n > 10 and rng.random() < 0.65:
+            pen.stroke(centre[int(n * 0.18):int(n * 0.85)], W0 * 0.34, taper=(0.35, 0.55), smooth=2, wobble=0.14)
+        return
+
+    if style == "pinch":
+        # Converging V/U ravine tip: rims smoothly pinch together to a point as cliff height ramps down to 0!
+        hw = (w0 * 0.5) * np.clip(1.0 - (u ** 1.25), 0.0, 1.0)
+        mask = np.clip((1.0 - u) / 0.78, 0.0, 1.0) ** 1.35
+        l_taper = (0.14, 0.58)
+    else:
+        # Flared valley mouth: rims curve gently outward as both escarpments ramp smoothly down into flat plain!
+        hw = (w0 * 0.5) * (1.0 + rng.uniform(0.45, 0.85) * (u ** 1.8))
+        mask = np.clip((1.0 - u) / 0.72, 0.0, 1.0) ** 1.55
+        l_taper = (0.14, 0.68)
+
+    rim_l = _safe_offset_rim(centre, nr, -hw)
+    rim_r = _safe_offset_rim(centre, nr, hw)
+    left_j, nr_l = jagged(rng, rim_l, nr, amp=1.05, closed=False)
+    right_j, nr_r = jagged(rng, rim_r, -nr, amp=1.05, closed=False)
+
+    hmax = min(FACE_H[1] * 1.12, w0 * 0.80)
+    clip_for_left = _make_rim_clipper(right_j) if (role in ("left", "right") and left_j[:, 1].mean() < right_j[:, 1].mean()) else None
+    clip_for_right = _make_rim_clipper(left_j) if (role in ("left", "right") and right_j[:, 1].mean() < left_j[:, 1].mean()) else None
+
+    escarp(pen, left_j, nr_l, hmax, mask=mask, density=1.12, jag=0.0, floor_clip=clip_for_left,
+           open_ends=(True, False), line_taper=l_taper)
+    escarp(pen, right_j, nr_r, hmax, mask=mask, density=1.12, line_w=1.10, jag=0.0, floor_clip=clip_for_right,
+           open_ends=(True, False), line_taper=l_taper)
+
+    # Faint meandering dry-wash crease emerging gently out of a converging ravine pinch-out
+    if style == "pinch" and n > 10 and rng.random() < 0.72:
+        tang = centre[-1] - centre[-2]
+        tang /= max(1e-6, float(np.hypot(*tang)))
+        i0 = int(n * 0.30)
+        u_g = np.linspace(0.0, 1.0, n - i0)
+        wig = (1.3 * np.sin(TAU * u_g * rng.uniform(0.8, 1.4) + rng.uniform(0, TAU))) * (1.0 - 0.7 * u_g)
+        core = [centre[i0 + k] + nr[i0 + k] * wig[k] for k in range(n - i0)]
+        ext = [centre[-1] + tang * d + nr[-1] * rng.normal(0, 0.9) for d in (4.5, 11.0, 17.0)]
+        pen.stroke(core + ext, W0 * 0.34, taper=(0.40, 0.86), smooth=2, wobble=0.18)

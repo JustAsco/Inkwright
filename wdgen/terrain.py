@@ -252,6 +252,259 @@ def fields(pen, P, rng):
             pen.bush(*P(*args), rng.uniform(4.5, 7.2), outline=True)
 
 
+# --------------------------------------------------------------------------- marshes & swamps
+
+def _marsh_tuft(pen, rng, sx, sy, w=14.0, h=6.5, cattails=False):
+    """Classic hand-inked cartographic marsh symbol: level horizontal waterline bar + fanning sedge blades & optional cattails."""
+    W0 = pen.width
+    # Level horizontal waterline base bar (+ optional subtle ripple line underneath)
+    pen.stroke([(sx - w * 0.5, sy), (sx + w * 0.5, sy)], W0 * 0.62, taper=(0.35, 0.35), wobble=0.14)
+    if rng.random() < 0.62:
+        rw = w * rng.uniform(0.45, 0.78)
+        rx = sx + rng.uniform(-w * 0.14, w * 0.14)
+        pen.stroke([(rx - rw * 0.5, sy + rng.uniform(2.0, 3.2)), (rx + rw * 0.5, sy + rng.uniform(2.0, 3.2))],
+                   W0 * 0.36, taper=(0.45, 0.45), wobble=0.10)
+
+    # Fanning vertical/curving marsh sedge blades sprouting above the horizontal waterline
+    n_blades = int(rng.integers(4, 8))
+    xs = np.linspace(sx - w * 0.34, sx + w * 0.34, n_blades)
+    for i, bx in enumerate(xs):
+        f = (i - (n_blades - 1) * 0.5) / max(1.0, (n_blades - 1) * 0.5)
+        bh = h * (1.0 - 0.32 * abs(f)) * rng.uniform(0.75, 1.18)
+        lean = f * bh * rng.uniform(0.28, 0.58) + rng.normal(0, 0.5)
+        mid = (bx + lean * 0.45, sy - bh * 0.55)
+        tip = (bx + lean, sy - bh)
+        pen.stroke([(bx, sy), mid, tip], W0 * 0.48, taper=(0.05, 0.75), smooth=1, wobble=0.06)
+
+    # Optional plump dark cattail / bulrush spikes rising cleanly above the sedge tuft
+    if cattails:
+        for _ in range(int(rng.integers(1, 3))):
+            cx = sx + rng.uniform(-w * 0.24, w * 0.24)
+            ch = h * rng.uniform(1.18, 1.55)
+            cl = rng.uniform(-2.6, 2.6)
+            p_mid = (cx + cl * 0.45, sy - ch * 0.52)
+            p_top = (cx + cl, sy - ch)
+            pen.stroke([(cx, sy), p_mid, p_top], W0 * 0.46, taper=(0.05, 0.25), smooth=1, wobble=0.05)
+            # Plump dark oval cattail head + tiny needle tip above it
+            hx = cx + cl * 0.80
+            hy = sy - ch * 0.80
+            dx, dy = cl * 0.14, -ch * 0.14
+            nx, ny = -dy, dx
+            ln = max(1e-6, math.hypot(nx, ny))
+            nx, ny = nx / ln * 1.15, ny / ln * 1.15
+            head = [(hx - dx - nx, hy - dy - ny), (hx - dx + nx, hy - dy + ny),
+                    (hx + dx + nx, hy + dy + ny), (hx + dx - nx, hy + dy - ny)]
+            pen.blot(head, jitter=0.04)
+
+
+def _bog_pool(pen, rng, cx, cy, rx, ry):
+    """Flat, wide sunken swamp pool with organic pinched lobes, inner bank shadow & level horizontal water ripples."""
+    W0 = pen.width
+    n = 32
+    ts = np.linspace(0.0, TAU, n, endpoint=False)
+    ph1, ph2 = rng.uniform(0, TAU), rng.uniform(0, TAU)
+    # Elongated pinched wetland puddle silhouette (flat ~4:1 aspect so it reads strictly as sunken water, never a mound!)
+    pts = []
+    for t in ts:
+        mod_x = 1.0 + 0.14 * math.sin(2 * t + ph1) + 0.08 * math.cos(3 * t + ph2)
+        mod_y = 1.0 + 0.24 * math.cos(2 * t + ph1 * 0.6) + 0.14 * math.sin(3 * t + ph2)
+        pts.append((cx + rx * mod_x * math.cos(t), cy + ry * mod_y * math.sin(t)))
+    pts = list(chaikin(pts + [pts[0]], 1))[:-1]
+
+    P_arr = np.asarray(pts, float)
+    n_p = len(P_arr)
+    for i in range(n_p):
+        p0, p1 = P_arr[i], P_arr[(i + 1) % n_p]
+        ym = (p0[1] + p1[1]) * 0.5
+        if ym < cy - ry * 0.05:
+            # Crisp recessed north/back mud lip
+            pen.stroke([tuple(p0), tuple(p1)], W0 * 0.64, taper=(0.05, 0.05), wobble=0.12)
+        elif rng.random() < 0.52:
+            # Soft broken south water edge merging into mire
+            pen.stroke([tuple(p0), tuple(p1)], W0 * 0.36, taper=(0.30, 0.30), wobble=0.12)
+
+    # Strictly LEVEL horizontal water-surface ripple lines + denser shore-shadow ripples right under the north bank!
+    y_min, y_max = float(P_arr[:, 1].min()), float(P_arr[:, 1].max())
+    sp_y = rng.uniform(2.0, 2.6)
+    y = y_min + sp_y * 0.65
+    row_idx = 0
+    while y < y_max - sp_y * 0.4:
+        xs_hit = []
+        for i in range(n_p):
+            ax, ay = P_arr[i]
+            bx, by = P_arr[(i + 1) % n_p]
+            if (ay <= y < by) or (by <= y < ay):
+                xs_hit.append(ax + (bx - ax) * (y - ay) / (by - ay))
+        xs_hit.sort()
+        for k in range(0, len(xs_hit) - 1, 2):
+            xa, xb = xs_hit[k] + 2.0, xs_hit[k + 1] - 2.0
+            span = xb - xa
+            if span < 5.0:
+                continue
+            if row_idx < 2:
+                # Subtle overhanging-bank water reflection hugging right under the upper shoreline
+                f0, f1 = rng.uniform(0.02, 0.14), rng.uniform(0.84, 0.98)
+                pen.stroke([(xa + span * f0, y), (xa + span * f1, y)],
+                           W0 * 0.46, taper=(0.35, 0.35), wobble=0.07)
+            elif rng.random() < 0.80:
+                f0 = rng.uniform(0.05, 0.34)
+                f1 = rng.uniform(max(f0 + 0.24, 0.56), 0.95)
+                pen.stroke([(xa + span * f0, y), (xa + span * f1, y)],
+                           W0 * 0.34, taper=(0.45, 0.45), wobble=0.07)
+        y += sp_y * rng.uniform(0.88, 1.15)
+        row_idx += 1
+
+    # 1-2 tiny notched lily pads floating on the calm bog pool
+    for _ in range(int(rng.integers(1, 3))):
+        lx = cx + rng.uniform(-rx * 0.42, rx * 0.42)
+        ly = cy + rng.uniform(-ry * 0.28, ry * 0.28)
+        lr = rng.uniform(1.8, 2.8)
+        pad_pts = [(lx + lr * math.cos(a), ly + lr * 0.40 * math.sin(a))
+                   for a in np.linspace(0.35, TAU - 0.15, 10)] + [(lx, ly)]
+        pen.cv.erase(pad_pts)
+        pen.closed(pad_pts, W0 * 0.38, wobble=0.05)
+
+
+def _rotting_stump(pen, rng, sx, sy, r=4.0, h=5.5):
+    """Weathered mossy swamp stump with flared roots emerging from the mire."""
+    W0 = pen.width
+    body = [
+        (sx - r * 1.35, sy + 1.0), (sx - r * 0.85, sy - h * 0.5), (sx - r * 0.75, sy - h),
+        (sx + r * 0.75, sy - h * 0.85), (sx + r * 0.90, sy - h * 0.4), (sx + r * 1.40, sy + 0.9),
+        (sx, sy + 1.5),
+    ]
+    pen.cv.erase(body)
+    sh = [(sx, sy - h * 0.9), (sx + r * 0.75, sy - h * 0.85), (sx + r * 1.40, sy + 0.9), (sx, sy + 1.5)]
+    pen.hatch(sh, 82, 1.5, W0 * 0.46, coverage=(0.65, 1.0))
+    pen.closed(body, W0 * 0.72, wobble=0.14)
+    pen.stroke([(sx - r * 1.9, sy + 1.8), (sx + r * 1.9, sy + 1.8)], W0 * 0.42, taper=(0.45, 0.45), wobble=0.1)
+
+
+def _swamp_tree(pen, rng, sx, sy, h=28.0, mossy=True):
+    """Gnarled swamp deadwood snag with organic root flare & bog sedge tucked at its base."""
+    W0 = pen.width
+    lean = rng.uniform(-0.16, 0.16)
+    # Soft organic root flare gripping a tiny mossy hummock (no rigid triangle tripod!)
+    for sgn in (-1.0, 1.0):
+        pen.stroke([(sx + sgn * 0.9, sy - h * 0.14), (sx + sgn * 3.4, sy - 0.6), (sx + sgn * 6.4, sy + 0.8)],
+                   W0 * 0.70, taper=(0.05, 0.80), smooth=1, wobble=0.12)
+    pen.dead_tree(sx, sy, h, lean=lean)
+    # Small mossy marsh-tuft right beside the roots so the snag sits naturally in the bog
+    _marsh_tuft(pen, rng, sx + rng.uniform(-3.0, 3.0), sy + 1.6, w=rng.uniform(11, 16), h=rng.uniform(4.2, 6.2), cattails=False)
+
+
+def marsh(pen, P, rng):
+    """Hand-inked cartographic marshes & bogs: flat sunken bog pools, horizontal marsh-tuft bars, cattails & swamp snags.
+
+    Uses strictly horizontal water-surface lines (zero diagonal horizon tilt) and open feathered edges so
+    multiple stamps overlap organically into vast fens, wetlands and wooded swamps on Wonderdraft maps.
+    """
+    ox, oy = P.ox, P.oy
+    mode = str(rng.choice(["wide_fen", "wooded_bog", "compact_mire", "winding_bayou"],
+                          p=[0.30, 0.30, 0.22, 0.18]))
+
+    # 1. Flat organic shallow bog pools (~4:1 horizontal foreshortening so pools read instantly as standing water!)
+    pools = []
+    if mode == "wide_fen":
+        n_p = int(rng.integers(2, 4))
+        xs = np.linspace(-58, 58, n_p) + rng.uniform(-10, 10, n_p)
+        for px in xs:
+            py = rng.uniform(-22, 22)
+            pools.append((ox + px, oy + py, rng.uniform(26, 42), rng.uniform(6.0, 9.5)))
+        spread_x, spread_y = 94.0, 44.0
+    elif mode == "wooded_bog":
+        n_p = int(rng.integers(1, 3))
+        for k in range(n_p):
+            px = (rng.uniform(-44, -8) if k == 0 else rng.uniform(10, 46)) if n_p == 2 else rng.uniform(-14, 14)
+            py = rng.uniform(-16, 18)
+            pools.append((ox + px, oy + py, rng.uniform(28, 44), rng.uniform(6.5, 10.0)))
+        spread_x, spread_y = 86.0, 44.0
+    elif mode == "compact_mire":
+        pools.append((ox + rng.uniform(-8, 8), oy + rng.uniform(-6, 6), rng.uniform(24, 38), rng.uniform(6.0, 9.0)))
+        spread_x, spread_y = 60.0, 32.0
+    else:  # winding_bayou: staggered vertical/diagonal wetland pools
+        n_p = int(rng.integers(2, 4))
+        ys = np.linspace(-38, 38, n_p) + rng.uniform(-6, 6, n_p)
+        for py in ys:
+            px = rng.uniform(-24, 24)
+            pools.append((ox + px, oy + py, rng.uniform(24, 38), rng.uniform(5.8, 8.8)))
+        spread_x, spread_y = 68.0, 58.0
+
+    # Draw open water pools first (ground layer)
+    for cx, cy, rx, ry in sorted(pools, key=lambda p: p[1]):
+        _bog_pool(pen, rng, cx, cy, rx, ry)
+
+    # 2. Gather vertical marsh props (cattail tufts, marsh-bars, mossy hummocks, stumps, swamp trees) sorted top-to-bottom!
+    props = []
+
+    def _inside_any_pool(x, y, margin=0.82):
+        return any(((x - cx) / (rx * margin)) ** 2 + ((y - cy) / (ry * margin)) ** 2 < 1.0 for cx, cy, rx, ry in pools)
+
+    # Ring of lush reed & cattail marsh-tufts hugging pool shorelines
+    for cx, cy, rx, ry in pools:
+        n_edge = int(rng.integers(4, 7))
+        for ang in np.linspace(0.0, TAU, n_edge, endpoint=False) + rng.uniform(0, 0.5):
+            tx = cx + rx * rng.uniform(0.92, 1.18) * math.cos(ang)
+            ty = cy + ry * rng.uniform(0.88, 1.18) * math.sin(ang)
+            props.append((ty, "tuft", (tx, ty, rng.uniform(11, 18), rng.uniform(5.8, 9.0), rng.random() < 0.52)))
+
+    # Feathered outer cartographic marsh-tuft bars & stray horizontal water ticks blending into map terrain
+    n_outer = int(rng.integers(8, 14) if mode != "compact_mire" else rng.integers(5, 9))
+    for _ in range(n_outer):
+        for _ in range(20):
+            ang = rng.uniform(0.0, TAU)
+            rad = rng.uniform(0.35, 1.02)
+            tx = ox + spread_x * rad * math.cos(ang)
+            ty = oy + spread_y * rad * math.sin(ang)
+            if not _inside_any_pool(tx, ty, margin=0.72):
+                # Keep outer fringe slightly lighter/smaller so stamps fade softly at edges
+                edge_f = 1.0 - 0.30 * max(0.0, rad - 0.55) / 0.45
+                props.append((ty, "tuft", (tx, ty, rng.uniform(10, 17) * edge_f,
+                                           rng.uniform(4.8, 7.6) * edge_f, rng.random() < 0.30)))
+                break
+
+    # Extra delicate stray horizontal water-ripple lines across wet ground between pools
+    for _ in range(int(rng.integers(5, 10))):
+        ang = rng.uniform(0.0, TAU)
+        rad = rng.uniform(0.25, 0.95)
+        rx_l = ox + spread_x * rad * math.cos(ang)
+        ry_l = oy + spread_y * rad * math.sin(ang)
+        props.append((ry_l, "ripple", (rx_l, ry_l, rng.uniform(9, 20))))
+
+    # Wooded swamp trees, dead snags & rotting stumps
+    n_trees = int(rng.integers(2, 4)) if mode == "wooded_bog" else (1 if (mode != "wide_fen" and rng.random() < 0.55) else 0)
+    tree_pts = []
+    for _ in range(n_trees):
+        for _ in range(30):
+            tx = ox + rng.uniform(-spread_x * 0.65, spread_x * 0.65)
+            ty = oy + rng.uniform(-spread_y * 0.58, spread_y * 0.58)
+            if not _inside_any_pool(tx, ty, margin=0.68) and all(math.hypot(tx - qx, ty - qy) > 22.0 for qx, qy in tree_pts):
+                tree_pts.append((tx, ty))
+                props.append((ty, "tree", (tx, ty, rng.uniform(22, 34), rng.random() < 0.62)))
+                break
+
+    for _ in range(int(rng.integers(1, 3)) if mode != "compact_mire" else int(rng.integers(0, 2))):
+        for _ in range(20):
+            sx_s = ox + rng.uniform(-spread_x * 0.65, spread_x * 0.65)
+            sy_s = oy + rng.uniform(-spread_y * 0.60, spread_y * 0.60)
+            if not _inside_any_pool(sx_s, sy_s, margin=0.72) and all(math.hypot(sx_s - qx, sy_s - qy) > 12.0 for qx, qy in tree_pts):
+                props.append((sy_s, "stump", (sx_s, sy_s, rng.uniform(3.2, 4.6), rng.uniform(4.2, 6.2))))
+                break
+
+    # Render back-to-front (ascending screen y!) so foreground cattails & snags cleanly overlap pools behind them!
+    W0 = pen.width
+    for _, kind, args in sorted(props, key=lambda it: it[0]):
+        if kind == "tuft":
+            _marsh_tuft(pen, rng, *args)
+        elif kind == "ripple":
+            rx_l, ry_l, rl = args
+            pen.stroke([(rx_l - rl * 0.5, ry_l), (rx_l + rl * 0.5, ry_l)], W0 * 0.40, taper=(0.45, 0.45), wobble=0.10)
+        elif kind == "tree":
+            _swamp_tree(pen, rng, *args)
+        elif kind == "stump":
+            _rotting_stump(pen, rng, *args)
+
+
 # --------------------------------------------------------------------------- cliffs & canyons
 # Hand-inked map escarpments designed to STACK SEAMLESSLY without rotating:
 # - Shared FACE_H scale across all cliffs, steep cliffs, curves, bays, mesas, terraced hills, canyons.

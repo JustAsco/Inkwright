@@ -66,7 +66,7 @@ out/InkwrightLine/sprites/{trees,mountains,symbols}/Inkwright Line - ...  line s
 preview/<Group>/<Category>_<style>.png      contact sheet per category
 ```
 
-Symbol groups (Settlements, Ruins, Lairs, Divine, Land, Terraforming) put all of their categories in
+Symbol groups (Settlements, Tribal, Ruins, Lairs, Divine, Land, Terraforming) put all of their categories in
 one folder under `sprites/symbols/`, so Wonderdraft shows one palette per group (`Inkwright -
 Terraforming`, `Inkwright - Land`, etc.).
 **Trees** and **Mountains** go into `sprites/trees/` and `sprites/mountains/` with one subfolder
@@ -130,22 +130,62 @@ hatched into shadow.
 **Settlements**
 - **Houses**: cottages, two-storey houses, longhouses and barns. Gables face front or side.
   Variants add timber framing, chimneys, dormers, lean-tos, and tiled or thatched roofs.
+- **Townhouses**: tall 2–3 storey narrow urban buildings with tiled roofs, jettied half-timbered
+  upper floors, crow-step gables, dormers and chimneys, in single, attached 2–3 facade row-house
+  terraces and L-shaped corner tavern layouts.
+- **Town Parts**: modular civic and urban landmarks at settlement scale — arched **Guildhalls**
+  with clocktower spires, bustling **Market Squares** (central stone fountain or well ringed by
+  striped-awning stalls and crates), twin-spired gothic **Cathedrals**, U/L-shaped courtyard
+  **Manors**, stone tower and timber post **Windmills**, and timber-crane **Warehouses**.
+- **City Walls**: modular intact crenellated E–W and N–S stone wall runs, twin-towered arched
+  portcullis **Gatehouses** with drawbridges, and standalone round/square **Watchtowers**.
 - **Hamlets**: 3–4 houses packed closely in wide, north–south or rounded yard clusters, sometimes
   with a well or a fence.
 - **Villages**: 6–12 houses laid out along wide east–west lanes, tall north–south lanes, crossroads
   or circular village greens. Many centre on a buttressed stone parish church (with a tall
   cross-topped bell steeple, gothic lancets and optional cruciform transepts), plus a well, garden
   fences and trees.
-- Houses and hamlets share one scale and are cropped tightly with no stray ground clutter, so you
-  can place them close together to build up a town. Some come with one or two trees (spruce,
-  cypress or a broadleaf oak).
+- **Big Villages**: sprawling 22–28 house rural towns along crossroads, curved high-streets with
+  side lanes, or wide double-ring village greens, complete with parish church, optional windmill,
+  well, garden fences and trees.
+- **Castles**: intact crenellated medieval fortresses in wide curtain, deep six-tower, hexagonal
+  ring and concentric dual-wall layouts, with conical/battlemented towers, portcullis gatehouses,
+  banners, royal keeps and bailey halls.
+- **Cities**: three-tier fortified medieval metropolises combining an **inner walled castle/citadel**
+  (taller stone walls, corner turrets and barbican gatehouse enclosing a royal keep, spire-fortress or
+  twin-spired cathedral), a wealthy **middle walled city** (~55–75 densely clustered 2–3 storey tiled
+  townhouses and civic guildhall inside multi-tower ramparts), and an extensive **outer poor city**
+  (~105–120 humble 1-storey thatched cottages and hovels huddling tightly against the outer walls and
+  tapering outward along branching dirt approach roads, with fences, wells, stalls and trees).
+- Houses, townhouses, town parts, city walls and hamlets share one scale and are cropped tightly
+  with no stray ground clutter, so you can compose custom towns and cities directly in Wonderdraft.
+
+**Tribal** *(Mountain Tribes & Viking Clans)*
+- **Houses**: standalone conical hide teepees with crossed ridge poles and leather flaps, felt
+  mountain yurts with braided rope bands and smoke crowns, steep horned A-frame alpine lodges,
+  notched-log Viking longhouses with carved dragon-prow gables and stave porches, and highland
+  dry-stone & thatch roundhouses.
+- **Camp Props**: modular hide-stretching frames and meat/fish **Drying Racks**, stone-ring
+  **Bonfires** (with optional tripod cauldron and log benches), carved winged spirit **Totems** &
+  horned war banners, sharpened-log **Palisades**, and braced-stilt timber **Watchtowers**.
+- **Camps**: compact 4–6 tent/yurt/hut raiding or hunting camps ringed around a central bonfire,
+  drying racks, clan totem, alpine spruces and highland boulders.
+- **Villages**: 11–16 structure mountain-tribe and Viking clan strongholds anchored by a chieftain's
+  great longhouse, central bonfire and totem plaza, drying racks, alpine spruces and an optional
+  six-sided sharpened-log palisade with a horned spiked gate and timber watchtower.
 
 **Ruins**
-- **Cottages** and ruined **Villages**: stepped masonry breaches, partial roofs or bare rafters,
-  standing chimneys, ivy, rubble, and ruined parish churches with weathered or snapped steeples.
+- **Cottages**, **Townhouses** and ruined **Villages**: stepped masonry breaches, partial roofs or
+  bare rafters, gutted 2-storey urban row-house shells, standing chimneys, ivy, rubble, and ruined
+  parish churches with weathered or snapped steeples.
 - **Round Towers** and square **Keeps**.
 - **Castles**: wide, deep north–south, square and hexagonal ring-wall fortresses with crenellated
   curtain walls, corner towers and turrets, a twin-towered gatehouse and a central keep.
+- **Cities**: three-tier shattered walled, hexagonal and bastion metropolises combining a breached
+  **inner walled citadel** (taller ruined castle walls, corner turrets and ruined keep or abbey), a
+  dense gutted **middle urban ring** (~55–70 ruined townhouses and churches inside multi-tower outer
+  ramparts), and an extensive **ruined outer shantytown** (~80–95 shattered poor-quarter cottages
+  huddling against the outer walls and thinning outward along broken tracks with dead trees and rubble).
 - **Round Spires**: wizard towers with corbelled balconies and cone roofs (intact, caved in or
   snapped).
 - **Gothic Spires**: buttressed towers with lancet windows and a pyramid spire.
@@ -175,6 +215,10 @@ hatched into shadow.
 **Land**
 - **Fields**: wide, north–south and rounded patchworks of furrows, grain, orchards, vineyards,
   fallow land and pasture with haystacks. Edges are hedges, walls, fences or tracks.
+- **Marshes**: open fens, wooded swamps, compact mires and winding peat bayous with level
+  horizontal bog pools, lily pads, cattail & sedge waterline tufts, mossy rotting stumps and
+  gnarled buttressed swamp snags draped in moss. Open feathered edges let multiple stamps overlap
+  seamlessly into vast wetlands.
 
 **Terraforming**
 - **Cliffs**, **Steep Cliffs**, **Cliff Ends**, **Cliff Curves**, **Cliff Bays**, **Mesas**,
@@ -212,13 +256,15 @@ The wash is a second colour. These symbols won't tint as one colour unless you u
 | `wdgen/proj.py` | The 3/4 orthographic projection shared by every 3D symbol |
 | `wdgen/solids.py` | Boxes, cylinders, cones, pyramids, broken columns, earth mounds |
 | `wdgen/houses.py` | Intact houses (gable roofs, timber framing, dormers, lean-tos, chimneys), hamlets, villages, chapel, well |
+| `wdgen/cities.py` | Townhouses, civic town parts (guildhalls, markets, cathedrals, manors, windmills, warehouses), modular city walls, intact castles, big villages (20+ houses), dense fortified cities, ruined townhouses and city ruins |
+| `wdgen/tribal.py` | Mountain-tribe and Viking-style dwellings (tents, yurts, A-frames, longhouses, roundhouses), camp props (drying racks, bonfires, totems, log palisades, watchtowers), camps and palisaded clan villages |
 | `wdgen/flora.py` | Trees: spruce, cypress, broadleaf oak, palm, deadwood and Wonderdraft tree brush pools |
 | `wdgen/mountains.py` | Mountain brush pools: alpine mountains, jagged crags and rolling hills |
 | `wdgen/ruins.py` | Damaged walls and roofs, ivy, cottages, round towers, keeps, ruined villages |
 | `wdgen/castles.py` | Crenellated curtain walls, turrets, gatehouses, castles, round and gothic spires |
 | `wdgen/lairs.py` | 3D hills, cave portals, boulders, trails, burrow pits, nests, bones and other remains |
 | `wdgen/divine.py` | Temples (stylobates, Doric columns, entablatures, halls), stone circles, colossi, robed statues and their props, swords, obelisks |
-| `wdgen/terrain.py` | Fields (`Land`) and stackable cliffs, cliff ends, curves, bays, mesas, canyons and canyon ends (`Terraforming`) |
+| `wdgen/terrain.py` | Fields and marshes (`Land`) and stackable cliffs, cliff ends, curves, bays, mesas, canyons and canyon ends (`Terraforming`) |
 
 To add a symbol type, write a `draw(pen, P, rng)` function (`P` projects world `(x, y, height)` to
 the canvas, and `pen` draws strokes) and add it to `TYPES` in `generate.py`.

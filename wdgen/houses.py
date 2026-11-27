@@ -141,7 +141,7 @@ def _wall(pen, P, f, st):
                     pen.stroke([Wp(door[0] - 0.8, dh + 0.5), Wp(door[1] + 0.8, dh + 0.5)],
                                W0 * 0.55, taper=(0.1, 0.1), wobble=0.05)
 
-        rows = {0: [], 1: [H * 0.36], 2: [H * 0.16, H * 0.60]}[min(2, st["floors"])]
+        rows = {0: [], 1: [H * 0.36], 2: [H * 0.16, H * 0.60]}.get(min(2, st["floors"]), [])
         n = max(1, int((L - 5) / 11))
         ww, wh = st["win"]
         for hh in rows:
@@ -294,13 +294,14 @@ def draw_house(pen, P, X0, Y0, pl):
         else:
             cx, cy = X0 + W * rng.uniform(0.58, 0.70), Y0 + D * rng.uniform(0.20, 0.80)
             hb = H + R * (1 - abs(cx - (X0 + W / 2)) / (W / 2))
-        ctop = H + R + rng.uniform(2.8, 5.8)
-        box(pen, P, cx - 2.1, cy - 2.1, cx + 2.1, cy + 2.1, hb - 2.4, ctop)
+        cs = pl.get("chimney_scale", 1.0)
+        ctop = H + R + rng.uniform(2.8, 5.8) * cs
+        box(pen, P, cx - 2.1 * cs, cy - 2.1 * cs, cx + 2.1 * cs, cy + 2.1 * cs, hb - 2.4 * cs, ctop)
         # small overhanging stone chimney cap rim
-        box(pen, P, cx - 2.6, cy - 2.6, cx + 2.6, cy + 2.6, ctop, ctop + 1.3, shade=True)
+        box(pen, P, cx - 2.6 * cs, cy - 2.6 * cs, cx + 2.6 * cs, cy + 2.6 * cs, ctop, ctop + 1.3 * cs, shade=True)
         if pl.get("smoke"):
             # delicate short curling hearth-smoke wisp
-            sx, sy = P(cx, cy, ctop + 2.2)
+            sx, sy = P(cx, cy, ctop + 2.2 * cs)
             pts = [(sx, sy), (sx + 2.5, sy - 4.0), (sx + 1.0, sy - 8.0), (sx + 4.5, sy - 11.5)]
             pen.stroke(pts, W0 * 0.42, taper=(0.35, 0.65), smooth=2, wobble=0.2)
     if pl["leanto"]:

@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-from wdgen import castles, divine, flora, houses, lairs, mountains, ruins, terrain
+from wdgen import castles, cities, divine, flora, houses, lairs, mountains, ruins, terrain, tribal
 from wdgen.ink import Canvas, Pen
 from wdgen.proj import Proj
 
@@ -39,14 +39,39 @@ TYPES = {
     "hill": ("Mountains - Hills", mountains.hill, 310, 190, 0.62),
     # settlements
     "house": ("Settlements - Houses", houses.single_house, 200, 200, 0.62),
+    "townhouse": ("Settlements - Townhouses", cities.townhouse, 230, 250, 0.68),
+    "town_guildhall": ("Settlements - Town Parts", cities.town_guildhall, 280, 330, 0.72),
+    "town_market": ("Settlements - Town Parts", cities.town_market, 260, 240, 0.58),
+    "town_cathedral": ("Settlements - Town Parts", cities.town_cathedral, 340, 350, 0.72),
+    "town_manor": ("Settlements - Town Parts", cities.town_manor, 260, 260, 0.64),
+    "town_windmill": ("Settlements - Town Parts", cities.town_windmill, 220, 270, 0.74),
+    "town_warehouse": ("Settlements - Town Parts", cities.town_warehouse, 240, 250, 0.68),
+    "city_wall_ew": ("Settlements - City Walls", partial(cities.city_wall_piece, role="ew"), 240, 200, 0.68),
+    "city_wall_ns": ("Settlements - City Walls", partial(cities.city_wall_piece, role="ns"), 220, 240, 0.68),
+    "city_wall_gate": ("Settlements - City Walls", partial(cities.city_wall_piece, role="gate"), 280, 250, 0.70),
+    "city_wall_tower": ("Settlements - City Walls", partial(cities.city_wall_piece, role="tower"), 200, 270, 0.76),
     "hamlet": ("Settlements - Hamlets", houses.hamlet, 280, 280, 0.58),
     "town_village": ("Settlements - Villages", houses.village, 420, 400, 0.56),
+    "big_village": ("Settlements - Big Villages", cities.big_village, 640, 580, 0.56),
+    "intact_castle": ("Settlements - Castles", cities.intact_castle, 460, 460, 0.62),
+    "city": ("Settlements - Cities", cities.city, 960, 840, 0.52),
+    # tribal (mountain tribes & Viking-style clans)
+    "tribal_house": ("Tribal - Houses", tribal.tribal_house, 220, 220, 0.66),
+    "tribal_rack": ("Tribal - Camp Props", partial(tribal.tribal_prop, role="rack"), 180, 180, 0.66),
+    "tribal_bonfire": ("Tribal - Camp Props", partial(tribal.tribal_prop, role="bonfire"), 180, 180, 0.66),
+    "tribal_totem": ("Tribal - Camp Props", partial(tribal.tribal_prop, role="totem"), 180, 220, 0.76),
+    "tribal_palisade": ("Tribal - Camp Props", partial(tribal.tribal_prop, role="palisade"), 240, 220, 0.66),
+    "tribal_watchtower": ("Tribal - Camp Props", partial(tribal.tribal_prop, role="watchtower"), 200, 240, 0.74),
+    "tribal_camp": ("Tribal - Camps", tribal.tribal_camp, 340, 320, 0.58),
+    "tribal_village": ("Tribal - Villages", tribal.tribal_village, 540, 500, 0.58),
     # ruins
     "cottage": ("Ruins - Cottages", ruins.ruined_cottage, 260, 220),
+    "ruined_townhouse": ("Ruins - Townhouses", cities.ruined_townhouse, 240, 260, 0.68),
     "village": ("Ruins - Villages", ruins.ruined_village, 420, 380, 0.58),
     "round_tower": ("Ruins - Round Towers", ruins.ruined_tower, 220, 260),
     "keep": ("Ruins - Keeps", ruins.ruined_keep, 220, 260),
     "castle": ("Ruins - Castles", castles.castle, 420, 420, 0.62),
+    "ruined_city": ("Ruins - Cities", cities.ruined_city, 960, 840, 0.52),
     "round_spire": ("Ruins - Round Spires", partial(castles.spire, kind="round"), 200, 340, 0.86),
     "gothic_spire": ("Ruins - Gothic Spires", partial(castles.spire, kind="gothic"), 200, 340, 0.86),
     # lairs
@@ -66,6 +91,7 @@ TYPES = {
     "obelisk": ("Divine - Obelisks", divine.obelisk, 200, 300, 0.8),
     # land
     "field": ("Land - Fields", terrain.fields, 340, 320, 0.5),
+    "marsh": ("Land - Marshes", terrain.marsh, 320, 240, 0.54),
     # terraforming (stackable cliffs, mesas, canyons & neutralizing end-caps)
     "cliff": ("Terraforming - Cliffs", terrain.cliff, 280, 200, 0.5),
     "steep_cliff": ("Terraforming - Steep Cliffs", terrain.cliff_steep, 260, 260, 0.5),
@@ -243,7 +269,8 @@ def category_sheet(cat, per_kind, cols=6):
             imgs += row + [None] * (cols - len(row))
             labels += [f"{short} #{i:03d}" for i in range(len(row))] + [""] * (cols - len(row))
     bg = PARCHMENT if (cat.startswith(("Land", "Terraforming")) or cat in ("Mountains - Mountains", "Mountains - Varied Mountains", "Mountains - Crags")) else GRASS
-    return contact_sheet(imgs, cols=cols, bg=bg, labels=labels)
+    cell = 260 if cat in ("Settlements - Big Villages", "Settlements - Cities", "Settlements - Castles", "Ruins - Cities", "Tribal - Villages") else 200
+    return contact_sheet(imgs, cols=cols, cell=cell, bg=bg, labels=labels)
 
 
 def sprite_folder(out_dir, pack, label, cat):

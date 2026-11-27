@@ -17,11 +17,19 @@ only the bare rafters or a standing chimney.
 ![Ruined cottages, filled style](docs/cottage_filled.png)
 ![Ruined cottages, line style](docs/cottage_line.png)
 
-**Round spires**: intact, caved-in or snapped roofs, with an optional lower drum and a corbelled
-balcony.
+**Cities**: three-tier fortified metropolises combining an inner walled citadel (royal keep or
+cathedral), a dense middle ring of tiled townhouses inside multi-tower ramparts, and sprawling
+outer suburbs of thatched cottages along approach roads.
 
-![Round spires, filled style](docs/round_spire_filled.png)
-![Round spires, line style](docs/round_spire_line.png)
+![Cities, filled style](docs/city_filled.png)
+![Cities, line style](docs/city_line.png)
+
+**Divine temples**: classical Greek-style ruins in circular tholos, terraced forecourt, wide
+east–west and deep north–south layouts, with fluted columns, pediments, inner chambers and
+fallen column drums.
+
+![Divine temples, filled style](docs/temple_filled.png)
+![Divine temples, line style](docs/temple_line.png)
 
 ## Quick start
 
@@ -40,7 +48,7 @@ Then copy the pack folder from `out/` (for example `out/Inkwright/`) into Wonder
 
 | Option | Default | Meaning |
 |---|---|---|
-| `-t`, `--types` | all | Comma list of type names (`cottage,round_spire`) or category words (`land`, `cave`, `divine`) |
+| `-t`, `--types` | all | Comma list of type names (`cottage,city,temple`) or category words (`land`, `cave`, `divine`) |
 | `-n`, `--count` | 12 | Variants per type |
 | `--seed` | 1 | Change it for a fresh batch. The same seed always redraws the same symbols |
 | `--style` | `filled` | `filled`: ink with white paper inside shapes, so symbols hide roads and each other. `line`: ink only, transparent inside |
@@ -268,3 +276,17 @@ The wash is a second colour. These symbols won't tint as one colour unless you u
 
 To add a symbol type, write a `draw(pen, P, rng)` function (`P` projects world `(x, y, height)` to
 the canvas, and `pen` draws strokes) and add it to `TYPES` in `generate.py`.
+
+## License
+
+- **Source code**: [PolyForm Noncommercial License 1.0.0](LICENSE) (`PolyForm-Noncommercial-1.0.0`)
+- **Preview images and generated assets**: [Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)](LICENSE-ASSETS)
+
+You may use and modify the code and generate, use and share assets for personal and other
+non-commercial purposes with attribution (see [NOTICE](NOTICE)). Commercial use — including selling
+the code, selling generated asset packs or using generated assets in commercial projects — is not
+permitted without separate permission from the author.
+
+```text
+Required Notice: Copyright 2026 Asco (JustAsco) (https://github.com/JustAsco/FantasyMapAssetGenerator)
+```

@@ -288,5 +288,5 @@ the code, selling generated asset packs or using generated assets in commercial 
 permitted without separate permission from the author.
 
 ```text
-Required Notice: Copyright 2026 Asco (JustAsco) (https://github.com/JustAsco/FantasyMapAssetGenerator)
+Required Notice: Copyright 2026 Asco (JustAsco) (https://github.com/JustAsco/Inkwright)
 ```
